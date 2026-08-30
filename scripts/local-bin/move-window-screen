@@ -1,0 +1,164 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DIR="${1:-right}"
+
+hyprctl eval "
+  local win = hl.get_active_window()
+  if not win then return end
+  local cur_mon = hl.get_active_monitor()
+  if not cur_mon then return end
+  local raw_mons = hl.get_monitors()
+  local mons = {}
+  for _, m in ipairs(raw_mons) do
+    if not m.disabled then table.insert(mons, m) end
+  end
+  if #mons <= 1 then return end
+
+  local target = nil
+  if #mons == 2 then
+    for _, m in ipairs(mons) do
+      if m.name ~= cur_mon.name then
+        target = m
+        break
+      end
+    end
+  else
+    local min_y = math.huge
+    for _, m in ipairs(mons) do
+      if m.y < min_y then min_y = m.y end
+    end
+    local top_mons = {}
+    local bottom_mons = {}
+    for _, m in ipairs(mons) do
+      if math.abs(m.y - min_y) <= 200 then
+        table.insert(top_mons, m)
+      else
+        table.insert(bottom_mons, m)
+      end
+    end
+    table.sort(top_mons, function(a, b) return a.x < b.x end)
+    table.sort(bottom_mons, function(a, b) return a.x < b.x end)
+    local top_left = top_mons[1]
+    local top_right = top_mons[#top_mons]
+    local bottom = bottom_mons[1] or top_mons[2]
+    local dir = '${DIR}'
+    local is_left = (dir == 'left' or dir == 'l')
+    if cur_mon.name == bottom.name then
+      target = is_left and top_left or top_right
+    elseif cur_mon.name == top_left.name then
+      target = is_left and bottom or top_right
+    elseif cur_mon.name == top_right.name then
+      target = is_left and top_left or bottom
+    else
+      target = is_left and top_left or top_right
+    end
+  end
+
+  if target and target.name ~= cur_mon.name then
+    -- Move window to target monitor
+    hl.dispatch(hl.dsp.window.move({ monitor = target.name }))
+
+    local is_fullscreen = (win.fullscreen ~= 0 and win.fullscreen ~= false)
+    if is_fullscreen then
+      hl.dispatch(hl.dsp.window.fullscreen_state({ internal = 0, client = 0 }))
+      hl.dispatch(hl.dsp.window.fullscreen({ mode = 'maximized' }))
+    elseif win.floating then
+      local gap = 2
+      local bar_h = 30
+
+      -- Target monitor geometry
+      local avail_x = target.x + gap
+      local avail_y = target.y + gap
+      local avail_w = target.width - (gap * 2)
+      local avail_h = target.height - bar_h - (gap * 2)
+      local half_w = math.floor((avail_w - gap) / 2)
+      local half_h = math.floor((avail_h - gap) / 2)
+      local right_x = avail_x + half_w + gap
+      local bottom_y = avail_y + half_h + gap
+
+      -- Source monitor geometry
+      local old_avail_x = cur_mon.x + gap
+      local old_avail_y = cur_mon.y + gap
+      local old_avail_w = cur_mon.width - (gap * 2)
+      local old_avail_h = cur_mon.height - bar_h - (gap * 2)
+      local old_half_w = math.floor((old_avail_w - gap) / 2)
+      local old_half_h = math.floor((old_avail_h - gap) / 2)
+      local old_right_x = old_avail_x + old_half_w + gap
+      local old_bottom_y = old_avail_y + old_half_h + gap
+
+      local cur_w = win.size.x
+      local cur_h = win.size.y
+      local cur_x = win.at.x
+      local cur_y = win.at.y
+
+      -- 1. Maximized on source monitor
+      if math.abs(cur_w - old_avail_w) <= 40 and math.abs(cur_h - old_avail_h) <= 40 then
+        hl.dispatch(hl.dsp.window.resize({ x = avail_w, y = avail_h }))
+        hl.dispatch(hl.dsp.window.move({ x = avail_x, y = avail_y }))
+
+      -- 2. 50% Left Tiled
+      elseif math.abs(cur_x - old_avail_x) <= 30 and math.abs(cur_w - old_half_w) <= 40 and math.abs(cur_h - old_avail_h) <= 40 then
+        hl.dispatch(hl.dsp.window.resize({ x = half_w, y = avail_h }))
+        hl.dispatch(hl.dsp.window.move({ x = avail_x, y = avail_y }))
+
+      -- 3. 50% Right Tiled
+      elseif math.abs(cur_x - old_right_x) <= 30 and math.abs(cur_w - old_half_w) <= 40 and math.abs(cur_h - old_avail_h) <= 40 then
+        hl.dispatch(hl.dsp.window.resize({ x = half_w, y = avail_h }))
+        hl.dispatch(hl.dsp.window.move({ x = right_x, y = avail_y }))
+
+      -- 4. 50% Top Tiled
+      elseif math.abs(cur_y - old_avail_y) <= 30 and math.abs(cur_w - old_avail_w) <= 40 and math.abs(cur_h - old_half_h) <= 40 then
+        hl.dispatch(hl.dsp.window.resize({ x = avail_w, y = half_h }))
+        hl.dispatch(hl.dsp.window.move({ x = avail_x, y = avail_y }))
+
+      -- 5. 50% Bottom Tiled
+      elseif math.abs(cur_y - old_bottom_y) <= 30 and math.abs(cur_w - old_avail_w) <= 40 and math.abs(cur_h - old_half_h) <= 40 then
+        hl.dispatch(hl.dsp.window.resize({ x = avail_w, y = half_h }))
+        hl.dispatch(hl.dsp.window.move({ x = avail_x, y = bottom_y }))
+
+      -- 6. Top-Left Quarter
+      elseif math.abs(cur_x - old_avail_x) <= 30 and math.abs(cur_y - old_avail_y) <= 30 and math.abs(cur_w - old_half_w) <= 40 and math.abs(cur_h - old_half_h) <= 40 then
+        hl.dispatch(hl.dsp.window.resize({ x = half_w, y = half_h }))
+        hl.dispatch(hl.dsp.window.move({ x = avail_x, y = avail_y }))
+
+      -- 7. Top-Right Quarter
+      elseif math.abs(cur_x - old_right_x) <= 30 and math.abs(cur_y - old_avail_y) <= 30 and math.abs(cur_w - old_half_w) <= 40 and math.abs(cur_h - old_half_h) <= 40 then
+        hl.dispatch(hl.dsp.window.resize({ x = half_w, y = half_h }))
+        hl.dispatch(hl.dsp.window.move({ x = right_x, y = avail_y }))
+
+      -- 8. Bottom-Left Quarter
+      elseif math.abs(cur_x - old_avail_x) <= 30 and math.abs(cur_y - old_bottom_y) <= 30 and math.abs(cur_w - old_half_w) <= 40 and math.abs(cur_h - old_half_h) <= 40 then
+        hl.dispatch(hl.dsp.window.resize({ x = half_w, y = half_h }))
+        hl.dispatch(hl.dsp.window.move({ x = avail_x, y = bottom_y }))
+
+      -- 9. Bottom-Right Quarter
+      elseif math.abs(cur_x - old_right_x) <= 30 and math.abs(cur_y - old_bottom_y) <= 30 and math.abs(cur_w - old_half_w) <= 40 and math.abs(cur_h - old_half_h) <= 40 then
+        hl.dispatch(hl.dsp.window.resize({ x = half_w, y = half_h }))
+        hl.dispatch(hl.dsp.window.move({ x = right_x, y = bottom_y }))
+
+      -- 10. Proportional Floating Scale
+      else
+        local ratio_w = cur_w / math.max(1, old_avail_w)
+        local ratio_h = cur_h / math.max(1, old_avail_h)
+        local new_w = math.max(300, math.min(avail_w, math.floor(avail_w * ratio_w)))
+        local new_h = math.max(250, math.min(avail_h, math.floor(avail_h * ratio_h)))
+
+        local ratio_x = math.max(0, (cur_x - old_avail_x) / math.max(1, old_avail_w))
+        local ratio_y = math.max(0, (cur_y - old_avail_y) / math.max(1, old_avail_h))
+        local target_x = avail_x + math.floor(avail_w * ratio_x)
+        local target_y = avail_y + math.floor(avail_h * ratio_y)
+
+        if target_x + new_w > avail_x + avail_w then
+          target_x = avail_x + avail_w - new_w
+        end
+        if target_y + new_h > avail_y + avail_h then
+          target_y = avail_y + avail_h - new_h
+        end
+
+        hl.dispatch(hl.dsp.window.resize({ x = new_w, y = new_h }))
+        hl.dispatch(hl.dsp.window.move({ x = target_x, y = target_y }))
+      end
+    end
+  end
+" >/dev/null 2>&1 || true

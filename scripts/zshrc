@@ -1,0 +1,9 @@
+export PATH="$HOME/.local/bin:$PATH"
+
+
+# Added by Antigravity CLI installer
+export PATH="/home/subi/.local/bin:$PATH"
+
+# Locale settings (UK date format)
+export LOCPATH="$HOME/.local/share/locale"
+export LC_TIME="en_GB.UTF-8"

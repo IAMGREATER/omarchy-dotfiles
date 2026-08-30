@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+direction="${1:-next}"
+
+if [[ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
+  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+  for sock in "$XDG_RUNTIME_DIR"/hypr/*/.socket2.sock /tmp/hypr/*/.socket2.sock; do
+    if [[ -S "$sock" ]]; then
+      export HYPRLAND_INSTANCE_SIGNATURE="$(basename "$(dirname "$sock")")"
+      break
+    fi
+  done
+fi
+
+if [[ "$direction" == "prev" || "$direction" == "previous" ]]; then
+  hyprctl eval "hl.dispatch(hl.dsp.window.cycle_next({ next = false })); hl.dispatch(hl.dsp.window.bring_to_top()); hl.dispatch(hl.dsp.window.alter_zorder({ mode = 'top' }))" >/dev/null 2>&1 || true
+else
+  hyprctl eval "hl.dispatch(hl.dsp.window.cycle_next()); hl.dispatch(hl.dsp.window.bring_to_top()); hl.dispatch(hl.dsp.window.alter_zorder({ mode = 'top' }))" >/dev/null 2>&1 || true
+fi

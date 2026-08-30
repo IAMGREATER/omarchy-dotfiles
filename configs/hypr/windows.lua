@@ -1,0 +1,146 @@
+-- Personal Window Rules for Omarchy / Hyprland
+
+-- Default: All windows open in the floating layer for Windows 11 unified z-order stacking
+o.window(".*", { tile = false, float = true })
+
+-- Override any default tiling rules so all applications share the unified floating layer
+o.window({ tag = "chromium-based-browser" }, { tile = false, float = true })
+o.window({ tag = "firefox-based-browser" }, { tile = false, float = true })
+o.window("((google-)?[cC]hrom(e|ium)|[bB]rave-browser|[mM]icrosoft-edge|Vivaldi-stable|helium|firefox|zen|librewolf)", {
+  tile = false,
+  float = true,
+})
+o.window("^(libreoffice.*|soffice.bin|org.gnome.Evince|evince|okular|org.kde.okular|Gimp.*|inkscape|blender)$", {
+  tile = false,
+  float = true,
+})
+o.window("^(com.mitchellh.ghostty|Alacritty|kitty|foot)$", {
+  tile = false,
+  float = true,
+})
+
+
+
+-- 1. Utility & Dialog Windows (Auto-Floating & Centered)
+
+-- Calculators
+o.window("^(kcalc|org.kde.kcalc|gnome-calculator|org.gnome.Calculator|omacalc)$", {
+  float = true,
+  center = true,
+  size = { 420, 560 },
+  min_size = { 320, 440 },
+  max_size = { 620, 800 },
+  no_anim = true,
+})
+
+-- Audio & Network Mixers
+o.window("^(pavucontrol|org.pulseaudio.pavucontrol)$", {
+  float = true,
+  center = true,
+  size = { 760, 520 },
+})
+
+o.window("^(blueman-manager|.blueman-manager-wrapped)$", {
+  float = true,
+  center = true,
+  size = { 700, 480 },
+})
+
+o.window("^nm-connection-editor$", {
+  float = true,
+  center = true,
+  size = { 650, 500 },
+})
+
+-- Image & Quick Viewers
+o.window("^(imv|loupe|eog|org.gnome.Loupe)$", {
+  float = true,
+  center = true,
+  size = { 900, 650 },
+})
+
+-- Gesture & System Configuration GUIs
+o.window("^(eswl-config|WeazyStroke)$", {
+  float = true,
+  center = true,
+  size = { 850, 600 },
+})
+
+-- Polkit Authentication Prompts
+o.window("^(polkit-gnome-authentication-agent-1|polkit-kde-authentication-agent-1|org.kde.polkit-kde-authentication-agent-1)$", {
+  float = true,
+  center = true,
+  stay_focused = true,
+})
+
+-- 2. Picture-in-Picture (PiP) Video Rules
+o.window({ title = "(Picture.?in.?[Pp]icture|Picture-in-Picture|pip)" }, {
+  float = true,
+  pin = true,
+  keep_aspect_ratio = true,
+  size = { 560, 315 },
+})
+
+-- 3. Media & Video Call Idle Prevention (Keep screen awake during meetings/video)
+o.window("^(zoom|us.zoom.Zoom|vlc|org.videolan.vlc|skype|com.skype.Client)$", {
+  idle_inhibit = "focus",
+})
+
+-- 4. Stylus & Whiteboarding Canvas Setup (Floating for unified z-stacking)
+o.window("^(xournalpp|com.github.xournalpp.xournalpp|ch.openboard.OpenBoard|openboard)$", {
+  float = true,
+})
+
+-- 5. Browser Extension Popups (Bitwarden, 1Password, etc.) & Vault Unlock Dialogs
+-- Chromium extension popups have class `chrome-<ext_id>-<profile>` and initialTitle `_crx_<ext_id>`.
+-- Matching on class, initial_class, and initial_title ensures static rules (size, center) apply immediately upon window creation.
+o.window("^(Bitwarden|bitwarden|chrome-nngceckbapebfimnlniiiahkandclblb.*)$", {
+  float = true,
+  center = true,
+  size = { 460, 640 },
+  no_screen_share = true,
+  focus_on_activate = true,
+})
+
+o.window({ initial_title = "^_crx_.*" }, {
+  float = true,
+  center = true,
+  size = { 460, 640 },
+  focus_on_activate = true,
+})
+
+o.window({ initial_class = "^(Bitwarden|bitwarden|chrome-nngceckbapebfimnlniiiahkandclblb.*)$" }, {
+  float = true,
+  center = true,
+  size = { 460, 640 },
+  no_screen_share = true,
+  focus_on_activate = true,
+})
+
+o.window({ title = "(?i)(Bitwarden|1Password|KeePass|LastPass|Authenticator|Proton Pass|Extension:)" }, {
+  float = true,
+  center = true,
+  size = { 460, 640 },
+})
+
+-- 6. File Choosers, Save As, and Print Dialogs
+o.window({ title = "(?i)(Open File|Save File|Save As|Save Changes|Save Document|Save|Discard|Confirm|Confirmation|Warning|Alert|Prompt|Open Folder|Select a Folder|Choose Files|File Upload|Print|Print Preview)" }, {
+  float = true,
+  center = true,
+})
+
+-- 7. LibreOffice & App Dialogs (Templates, Properties, Style Managers)
+o.window({ title = "(?i)(Select a Template|Templates|Template Manager|New Document|Document Templates|Insert|Options|Properties|Paragraph|Character|Page Style|Styles)" }, {
+  float = true,
+  center = true,
+  stay_focused = true,
+})
+
+-- 8. Toolbar Customization & Palette Dialogs (Xournal++, etc. - stay pinned above main canvas for drag-and-drop)
+o.window({ title = "(?i)(Customize Toolbars|Customize Toolbar|Toolbar Customization|Manage Toolbar Sets)" }, {
+  float = true,
+  pin = true,
+})
+
+-- 8. Gesture Overlay Trail (Instant layer rendering without fade animation)
+hl.layer_rule({ match = { namespace = "easystroke-trail" }, no_anim = true, animation = "none" })
