@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""
+Omarchy Window Send Behind:
+- Alters active window's Z-order to 'bottom', sending it behind all other windows on the current workspace.
+- Focuses the next window in front so input immediately goes to it.
+"""
+
+import sys
+import os
+import glob
+import json
+import subprocess
+
+
+def ensure_hypr_env():
+    uid = os.getuid()
+    runtime_dir = os.getenv("XDG_RUNTIME_DIR", f"/run/user/{uid}")
+    os.environ["XDG_RUNTIME_DIR"] = runtime_dir
+
+    cur_sig = os.getenv("HYPRLAND_INSTANCE_SIGNATURE")
+    if cur_sig:
+        if os.path.exists(f"{runtime_dir}/hypr/{cur_sig}/.socket2.sock") or os.path.exists(f"/tmp/hypr/{cur_sig}/.socket2.sock"):
+            return cur_sig
+
+    candidates = glob.glob(f"{runtime_dir}/hypr/*/.socket2.sock") + glob.glob(f"/tmp/hypr/*/.socket2.sock")
+    if candidates:
+        candidates.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+        sig = os.path.basename(os.path.dirname(candidates[0]))
+        os.environ["HYPRLAND_INSTANCE_SIGNATURE"] = sig
+        return sig
+
+    return None
+
+
+def send_behind():
+    ensure_hypr_env()
+    try:
+        active_win = json.loads(subprocess.check_output(["hyprctl", "activewindow", "-j"], timeout=1))
+    except Exception:
+        active_win = None
+
+    if not active_win or not active_win.get("address"):
+        return
+
+    addr = active_win["address"]
+    norm_addr = addr if addr.startswith("0x") else ("0x" + addr)
+    spec = f"address:{norm_addr}"
+    ws_id = active_win.get("workspace", {}).get("id")
+
+    # 1. Lower active window to bottom of Z-stack
+    subprocess.run(["hyprctl", "eval", f'hl.dispatch(hl.dsp.window.alter_zorder({{ window = "{spec}", mode = "bottom" }}))'], capture_output=True, timeout=1)
+
+    # 2. Find and focus the next window on this workspace
+    try:
+        clients = json.loads(subprocess.check_output(["hyprctl", "clients", "-j"], timeout=1))
+        ws_clients = [c for c in clients if c.get("workspace", {}).get("id") == ws_id and c.get("mapped") and not c.get("hidden")]
+        other_clients = [c for c in ws_clients if (c.get("address") if c.get("address", "").startswith("0x") else ("0x" + c.get("address", ""))) != norm_addr]
+        if other_clients:
+            other_clients.sort(key=lambda c: c.get("focusHistoryID", 999))
+            next_addr = other_clients[0].get("address")
+            next_norm = next_addr if next_addr.startswith("0x") else ("0x" + next_addr)
+            next_spec = f"address:{next_norm}"
+            subprocess.run(["hyprctl", "eval", f'hl.dispatch(hl.dsp.focus({{ window = "{next_spec}" }}))'], capture_output=True, timeout=1)
+    except Exception:
+        pass
+
+
+if __name__ == "__main__":
+    send_behind()

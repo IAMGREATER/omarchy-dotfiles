@@ -1,0 +1,23 @@
+# Large binary gesture files (backed up to VAULT instead)
+configs/easystroke-wayland/gestures.json
+
+# Compiled binaries
+scripts/local-bin/eswl-daemon
+scripts/local-bin/claude
+scripts/local-bin/codex
+scripts/local-bin/gh
+scripts/local-bin/ghui
+scripts/local-bin/grok
+scripts/local-bin/crush
+scripts/local-bin/hunk
+scripts/local-bin/gemini
+scripts/local-bin/copilot
+scripts/local-bin/opencode
+scripts/local-bin/omp
+scripts/local-bin/playwright
+scripts/local-bin/pi
+scripts/local-bin/touchpad-pinch-zoom
+scripts/local-bin/xppen-config-gui
+configs/easystroke-wayland/*.bak*
+configs/easystroke-wayland/history.jsonl
+configs/omarchy/plugins/*/node_modules/

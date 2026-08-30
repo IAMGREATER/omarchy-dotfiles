@@ -1,0 +1,290 @@
+#!/usr/bin/env python3
+"""
+Universal 3-Finger Swipe Daemon for Omarchy / Hyprland
+Listens directly to touchpad & touchscreen evdev events and emits Super + Alt + C via uinput.
+"""
+
+import os
+import sys
+import glob
+import time
+import math
+import struct
+import select
+import signal
+import fcntl
+import subprocess
+
+sys.stdout.reconfigure(line_buffering=True)
+
+# 64-bit Linux input event format: 16 bytes timestamp, 2 bytes type, 2 bytes code, 4 bytes value
+EVENT_FORMAT = "llHHi"
+EVENT_SIZE = struct.calcsize(EVENT_FORMAT)
+
+EV_SYN = 0x00
+EV_KEY = 0x01
+EV_ABS = 0x03
+
+SYN_REPORT = 0x00
+BTN_TOUCH = 0x14a
+BTN_TOOL_TRIPLETAP = 0x14e
+
+ABS_X = 0x00
+ABS_Y = 0x01
+ABS_MT_SLOT = 0x2f
+ABS_MT_POSITION_X = 0x35
+ABS_MT_POSITION_Y = 0x36
+ABS_MT_TRACKING_ID = 0x39
+
+KEY_LEFTMETA = 125
+KEY_LEFTALT = 56
+KEY_C = 46
+
+UI_SET_EVBIT = 0x40045564
+UI_SET_KEYBIT = 0x40045565
+UI_DEV_SETUP = 0x405c5503
+UI_DEV_CREATE = 0x5501
+UI_DEV_DESTROY = 0x5502
+
+COOLDOWN_SECONDS = 0.4
+
+
+class VirtualKeyboard:
+    def __init__(self):
+        self.fd = os.open("/dev/uinput", os.O_WRONLY | os.O_NONBLOCK)
+        fcntl.ioctl(self.fd, UI_SET_EVBIT, EV_SYN)
+        fcntl.ioctl(self.fd, UI_SET_EVBIT, EV_KEY)
+        for key in [KEY_LEFTMETA, KEY_LEFTALT, KEY_C]:
+            fcntl.ioctl(self.fd, UI_SET_KEYBIT, key)
+
+        input_id = struct.pack("HHHH", 0x03, 0x1234, 0x5679, 1)  # BUS_USB
+        name = b"3Finger Swipe Virtual Keyboard" + b"\x00" * (80 - len("3Finger Swipe Virtual Keyboard"))
+        setup_data = input_id + name + struct.pack("I", 0)
+        fcntl.ioctl(self.fd, UI_DEV_SETUP, setup_data)
+        fcntl.ioctl(self.fd, UI_DEV_CREATE)
+        time.sleep(0.05)
+
+    def emit_cycle_state(self):
+        """Dispatches cycle-up directly and emits Super + Alt + C discrete key combo."""
+        # 1. Direct execution via Hyprland socket
+        try:
+            runtime_dir = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+            hypr_dir = os.path.join(runtime_dir, "hypr")
+            if os.path.isdir(hypr_dir) and "HYPRLAND_INSTANCE_SIGNATURE" not in os.environ:
+                sigs = sorted(os.listdir(hypr_dir), key=lambda s: os.path.getmtime(os.path.join(hypr_dir, s)), reverse=True)
+                if sigs:
+                    os.environ["HYPRLAND_INSTANCE_SIGNATURE"] = sigs[0]
+            subprocess.run(["/home/subi/.local/bin/omarchy-window-snap", "cycle-up"], check=False)
+        except Exception:
+            pass
+
+        # 2. Virtual Keyboard keypress
+        try:
+            now_s = int(time.time())
+            now_us = int((time.time() % 1) * 1000000)
+            syn = struct.pack("llHHi", now_s, now_us, EV_SYN, SYN_REPORT, 0)
+            ev_meta_dn = struct.pack("llHHi", now_s, now_us, EV_KEY, KEY_LEFTMETA, 1)
+            ev_alt_dn = struct.pack("llHHi", now_s, now_us, EV_KEY, KEY_LEFTALT, 1)
+            ev_c_dn = struct.pack("llHHi", now_s, now_us, EV_KEY, KEY_C, 1)
+            os.write(self.fd, ev_meta_dn + syn)
+            os.write(self.fd, ev_alt_dn + syn)
+            os.write(self.fd, ev_c_dn + syn)
+
+            time.sleep(0.02)
+
+            now_s = int(time.time())
+            now_us = int((time.time() % 1) * 1000000)
+            syn2 = struct.pack("llHHi", now_s, now_us, EV_SYN, SYN_REPORT, 0)
+            ev_c_up = struct.pack("llHHi", now_s, now_us, EV_KEY, KEY_C, 0)
+            ev_alt_up = struct.pack("llHHi", now_s, now_us, EV_KEY, KEY_LEFTALT, 0)
+            ev_meta_up = struct.pack("llHHi", now_s, now_us, EV_KEY, KEY_LEFTMETA, 0)
+            os.write(self.fd, ev_c_up + syn2)
+            os.write(self.fd, ev_alt_up + syn2)
+            os.write(self.fd, ev_meta_up + syn2)
+        except Exception:
+            pass
+
+    def close(self):
+        try:
+            fcntl.ioctl(self.fd, UI_DEV_DESTROY)
+            os.close(self.fd)
+        except Exception:
+            pass
+
+
+class DeviceSwipeTracker:
+    def __init__(self, dev_path, name, fd, vk):
+        self.dev_path = dev_path
+        self.name = name
+        self.fd = fd
+        self.vk = vk
+
+        lower_name = name.lower()
+        if "touchpad" in lower_name or "trackpad" in lower_name or "synaptics" in lower_name:
+            self.threshold = 15.0  # Responsive sensitivity on Touchpad
+            self.is_touchpad = True
+        else:
+            self.threshold = 40.0  # Responsive sensitivity on Touchscreen
+            self.is_touchpad = False
+
+        self.slots = {i: {"id": -1, "x": 0.0, "y": 0.0, "start_y": None} for i in range(16)}
+        self.current_slot = 0
+        self.tripletap_btn = False
+        self.gesture_triggered = False
+        self.last_swipe_time = 0.0
+
+    def handle_event(self, ev_type, ev_code, ev_val):
+        if ev_type == EV_KEY:
+            if ev_code == BTN_TOOL_TRIPLETAP:
+                self.tripletap_btn = bool(ev_val)
+                if not self.tripletap_btn:
+                    self.reset()
+            elif ev_code == BTN_TOUCH and not ev_val:
+                self.reset()
+
+        elif ev_type == EV_ABS:
+            if ev_code == ABS_MT_SLOT:
+                if 0 <= ev_val < 16:
+                    self.current_slot = ev_val
+            elif ev_code == ABS_MT_TRACKING_ID:
+                prev_id = self.slots[self.current_slot]["id"]
+                self.slots[self.current_slot]["id"] = ev_val
+                if ev_val == -1 or ev_val != prev_id:
+                    self.slots[self.current_slot]["start_y"] = None
+                    self.slots[self.current_slot]["y"] = 0.0
+            elif ev_code in (ABS_MT_POSITION_X, ABS_X):
+                self.slots[self.current_slot]["x"] = float(ev_val)
+            elif ev_code in (ABS_MT_POSITION_Y, ABS_Y):
+                self.slots[self.current_slot]["y"] = float(ev_val)
+                if self.slots[self.current_slot]["start_y"] is None:
+                    self.slots[self.current_slot]["start_y"] = float(ev_val)
+
+        elif ev_type == EV_SYN and ev_code == SYN_REPORT:
+            self._process_frame()
+
+    def _process_frame(self):
+        if self.tripletap_btn:
+            active = [s for s in self.slots.values() if s["start_y"] is not None and s["y"] > 0]
+            count = 3
+        else:
+            active = [s for s in self.slots.values() if s["id"] != -1 and s["start_y"] is not None and s["y"] > 0]
+            count = len(active)
+
+        if count == 3 and not self.gesture_triggered:
+            dys = [s["y"] - s["start_y"] for s in active if s["start_y"] is not None]
+            if dys:
+                avg_dy = sum(dys) / len(dys)
+                if abs(avg_dy) >= self.threshold:
+                    now = time.time()
+                    if now - self.last_swipe_time >= COOLDOWN_SECONDS:
+                        self.gesture_triggered = True
+                        self.last_swipe_time = now
+                        try:
+                            with open("/tmp/3finger_debug.log", "a") as dbg:
+                                dbg.write(f"{time.ctime()} - Triggering cycle! avg_dy={avg_dy:.1f}\n")
+                        except Exception:
+                            pass
+                        self.vk.emit_cycle_state()
+        elif count == 0 and not self.tripletap_btn:
+            self.reset()
+
+    def reset(self):
+        self.gesture_triggered = False
+        for s in self.slots.values():
+            s["start_y"] = None
+
+
+def find_touch_devices():
+    devices = []
+    for name_path in glob.glob("/sys/class/input/input*/name"):
+        try:
+            with open(name_path, "r") as f:
+                name = f.read().strip()
+            lower = name.lower()
+            if any(k in lower for k in ["touchpad", "trackpad", "finger", "touchscreen", "synaptics"]):
+                if "virtual" in lower or "pen" in lower:
+                    continue
+                input_dir = os.path.dirname(name_path)
+                for ev in glob.glob(os.path.join(input_dir, "event*")):
+                    dev_path = f"/dev/input/{os.path.basename(ev)}"
+                    if os.path.exists(dev_path):
+                        devices.append((dev_path, name))
+        except Exception:
+            continue
+    return devices
+
+
+def main():
+    vk = VirtualKeyboard()
+    fds = {}
+    trackers = {}
+
+    def cleanup():
+        for fd in fds.values():
+            try:
+                os.close(fd)
+            except Exception:
+                pass
+        vk.close()
+
+    def handle_signal(sig, frame):
+        cleanup()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, handle_signal)
+    signal.signal(signal.SIGTERM, handle_signal)
+
+    epoll = select.epoll()
+    last_scan = 0
+
+    while True:
+        try:
+            now = time.time()
+            if now - last_scan > 5.0:
+                last_scan = now
+                devs = find_touch_devices()
+                current_paths = set(fds.keys())
+                new_paths = set(p for p, _ in devs)
+
+                # Close removed
+                for p in current_paths - new_paths:
+                    try:
+                        fd = fds.pop(p)
+                        epoll.unregister(fd)
+                        trackers.pop(p, None)
+                        os.close(fd)
+                    except Exception:
+                        pass
+
+                # Open added
+                for p, name in devs:
+                    if p not in fds:
+                        try:
+                            fd = os.open(p, os.O_RDONLY | os.O_NONBLOCK)
+                            fds[p] = fd
+                            trackers[p] = DeviceSwipeTracker(p, name, fd, vk)
+                            epoll.register(fd, select.EPOLLIN)
+                        except Exception:
+                            pass
+
+            events = epoll.poll(timeout=1.0)
+            for fd, event in events:
+                if event & select.EPOLLIN:
+                    # Find matching tracker
+                    tracker = next((t for t in trackers.values() if t.fd == fd), None)
+                    if tracker:
+                        try:
+                            data = os.read(fd, EVENT_SIZE * 32)
+                            for i in range(0, len(data), EVENT_SIZE):
+                                chunk = data[i:i + EVENT_SIZE]
+                                if len(chunk) == EVENT_SIZE:
+                                    sec, usec, ev_type, ev_code, ev_val = struct.unpack(EVENT_FORMAT, chunk)
+                                    tracker.handle_event(ev_type, ev_code, ev_val)
+                        except OSError:
+                            pass
+        except Exception:
+            pass
+
+
+if __name__ == "__main__":
+    main()

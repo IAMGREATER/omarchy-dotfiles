@@ -1,0 +1,60 @@
+ID                               STATE     SOURCE      KINDS              NAME
+omarchy.active-window            enabled   first-party bar-widget         Active window
+ssupt.audio-control              enabled   third-party bar-widget,panel   Advanced Audio Control
+omarchy.agents                   enabled   first-party bar-widget         Agents
+tyrsolution.app-launcher         enabled   third-party overlay,bar-widget,service App Launcher
+omarchy.audio                    disabled  first-party bar-widget         Audio
+tenzin.auto-workspace            enabled   third-party service,bar-widget Auto Workspace
+omarchy.background               enabled   first-party service            Background
+omarchy.bar                      enabled   first-party bar                Bar
+omarchy.battery                  enabled   first-party service            Battery
+better.displays                  disabled  third-party bar-widget         Better Displays
+io.github.yogeshojha.blip        enabled   third-party service,bar-widget Blip
+omarchy.bluetooth                enabled   first-party bar-widget         Bluetooth
+omarchy.clipboard                enabled   first-party overlay            Clipboard
+omarchy.clock                    enabled   first-party bar-widget         Clock
+omarchy.dev-gallery              enabled   first-party panel              Dev gallery
+omarchy.disk-speedtest           enabled   first-party panel              Disk speed test
+omarchy.monitor                  enabled   first-party bar-widget         Display
+rosakodu.dock                    enabled   third-party service,bar-widget Dock
+omarchy.dropbox                  disabled  first-party bar-widget         Dropbox
+omarchy.emojis                   enabled   first-party overlay            Emojis
+expose.window-overview           enabled   third-party overlay            Exposé
+im0001gt.hw-tooltip              enabled   third-party bar-widget         Hardware Tooltip
+omarchy.idle                     enabled   first-party service            Idle
+omarchy.image-picker             enabled   first-party overlay            Image picker
+omarchy.indicators               enabled   first-party bar-widget         Indicators
+omarchy.keyboard-layout          enabled   first-party bar-widget         Keyboard layout
+omarchy.lock                     disabled  first-party service            Lock Screen
+io.github.sirjul1337.lock-explorer enabled   third-party service,overlay    Lock Screen Explorer
+omarchy.media                    disabled  first-party service,bar-widget Media
+omarchy.microphone               enabled   first-party bar-widget         Microphone
+mirador                          enabled   third-party overlay            Mirador
+subi.notifications               enabled   third-party service            My Notifications
+omarchy.network                  enabled   first-party bar-widget         Network
+omarchy.nightlight               enabled   first-party service            Night Light
+jankeesvw.notification-center    enabled   third-party bar-widget         Notification Center
+omarchy.notifications            disabled  first-party service            Notifications
+io.github.grichard99.omaproton-vpn enabled   third-party bar-widget         OmaProton VPN
+io.github.twiking.omasettings    enabled   third-party bar-widget,service OmaSettings
+bobbynicholas.omaland            enabled   third-party panel,service      Omaland
+quickshell.ytmusic               enabled   third-party service,bar-widget,panel Omarchy YouTube Music
+omarchy.menu                     enabled   first-party menu,bar-widget    Omarchy menu
+omarchy.system-update            enabled   first-party bar-widget         Omarchy update
+omarchy.osd                      enabled   first-party panel              On-screen display
+io.github.brm-src.plugin-control-center enabled   third-party bar-widget         Plugin Control Center
+omarchy.polkit                   enabled   first-party service            Polkit Agent
+omarchy.power                    enabled   first-party bar-widget         Power
+omarchy.reminders                enabled   first-party overlay            Reminders
+omarchy.spacer                   disabled  first-party bar-widget         Spacer
+omarchy.speedtest                enabled   first-party panel              Speed Test
+dizziee.system-updates           enabled   third-party bar-widget         System Updates
+omarchy.tray                     enabled   first-party bar-widget         System tray
+omarchy.tailscale                disabled  first-party bar-widget         Tailscale
+omarchy.weather                  enabled   first-party bar-widget         Weather
+eduardodallecort.weather-radar   enabled   third-party service,bar-widget Weather Radar
+io.github.kristoferlund.webcam   enabled   third-party bar-widget         Webcam Controls
+omarchy.wifiqr                   enabled   first-party panel              Wi-Fi QR
+omarchy.workspaces               enabled   first-party bar-widget         Workspaces
+omarchy-xppen-tablet             disabled  third-party bar-widget         XP-Pen Tablet Control
+crmne.hyprmoncfg                 enabled   third-party bar-widget         hyprmoncfg: Multi-Monitor Manager for Omarchy
