@@ -10,7 +10,7 @@
 set -e
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-USER_HOME="/home/subi"
+USER_HOME="$HOME"  # Works for any username on any machine
 
 echo ""
 echo "============================================================"
