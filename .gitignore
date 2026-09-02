@@ -21,3 +21,8 @@ scripts/local-bin/xppen-config-gui
 configs/easystroke-wayland/*.bak*
 configs/easystroke-wayland/history.jsonl
 configs/omarchy/plugins/*/node_modules/
+# Large or proprietary binaries
+scripts/local-bin/agy
+*.pyc
+__pycache__/
+*.lock

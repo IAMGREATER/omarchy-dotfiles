@@ -1,7 +1,8 @@
 ID                               STATE     SOURCE      KINDS              NAME
 omarchy.active-window            enabled   first-party bar-widget         Active window
 ssupt.audio-control              enabled   third-party bar-widget,panel   Advanced Audio Control
-omarchy.agents                   enabled   first-party bar-widget         Agents
+omarchy.agents                   disabled  first-party bar-widget         Agents
+subi.agents                      enabled   third-party bar-widget         Agents
 tyrsolution.app-launcher         enabled   third-party overlay,bar-widget,service App Launcher
 omarchy.audio                    disabled  first-party bar-widget         Audio
 tenzin.auto-workspace            enabled   third-party service,bar-widget Auto Workspace

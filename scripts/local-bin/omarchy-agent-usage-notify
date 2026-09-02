@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Trigger update first so numbers are fresh
+"$HOME/.local/bin/omarchy-agent-usage-update" --limits-only 2>/dev/null
+
+data_file="$HOME/.local/state/omarchy/agents/usage/antigravity.json"
+copilot_file="$HOME/.local/state/omarchy/agents/usage/copilot.json"
+
+body=""
+
+if [[ -f "$data_file" ]]; then
+  body+="<b>Antigravity</b>\n"
+  # Extract limits
+  limits=$(jq -r '.limits[] | "• \(.label): \((.percent * 100 | round))%"' "$data_file" 2>/dev/null)
+  if [[ -n "$limits" ]]; then
+    body+="$limits\n"
+  fi
+  today_tokens=$(jq -r '.todayTotalTokens // 0' "$data_file" 2>/dev/null)
+  body+="• Today: ${today_tokens} tokens\n"
+fi
+
+if [[ -f "$copilot_file" ]]; then
+  body+="\n<b>GitHub Copilot</b>\n"
+  limits=$(jq -r '.limits[] | "• \(.label): \((.percent * 100 | round))%"' "$copilot_file" 2>/dev/null)
+  if [[ -n "$limits" ]]; then
+    body+="$limits\n"
+  fi
+  today_tokens=$(jq -r '.todayTotalTokens // 0' "$copilot_file" 2>/dev/null)
+  body+="• Today: ${today_tokens} tokens"
+fi
+
+notify-send -a "Agents" -i "dialog-information" "AI Agent Usage & Limits" "$body"
