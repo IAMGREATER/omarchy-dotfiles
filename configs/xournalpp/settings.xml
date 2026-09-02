@@ -6,7 +6,7 @@
   <property name="pressureMultiplier" value="1"/>
   <property name="zoomGesturesEnabled" value="true"/>
   <property name="selectedToolbar" value="All in Copy"/>
-  <property name="lastSavePath" value="/run/media/subi/VAULT/Win Backup 19-08-2025/abdul/Documents/MY FILES/MY WORK/OH/OH Students/Andy Armsby"/>
+  <property name="lastSavePath" value="/run/media/subi/VAULT/Win Backup 19-08-2025/abdul/Documents/MY FILES/MY WORK/OH/OH Students/Paulo Marcos"/>
   <property name="lastOpenPath" value=""/>
   <property name="lastImagePath" value=""/>
   <property name="edgePanSpeed" value="20"/>
@@ -245,7 +245,7 @@
     <data name="drawRect"/>
     <data name="drawSpline"/>
     <data name="eraser">
-      <attribute name="size" type="string" value="VERY_BIG"/>
+      <attribute name="size" type="string" value="MEDIUM"/>
       <attribute name="type" type="string" value="deleteStroke"/>
     </data>
     <data name="hand"/>
@@ -270,7 +270,7 @@
       <attribute name="drawingType" type="string" value="default"/>
       <attribute name="fill" type="int" value="0"/>
       <attribute name="fillAlpha" type="int" value="255"/>
-      <attribute name="size" type="string" value="MEDIUM"/>
+      <attribute name="size" type="string" value="THIN"/>
       <attribute name="style" type="string" value="plain"/>
     </data>
     <data name="playObject"/>
