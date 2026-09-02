@@ -1,6 +1,3 @@
-# Large binary gesture files (backed up to VAULT instead)
-configs/easystroke-wayland/gestures.json
-
 # Compiled binaries
 scripts/local-bin/eswl-daemon
 scripts/local-bin/claude
