@@ -1,5 +1,6 @@
 [tools]
 claude = "latest"
 codex = "latest"
+copilot = "latest"
 gh = "latest"
 node = "26.7.0"

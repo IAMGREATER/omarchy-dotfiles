@@ -54,7 +54,7 @@
 -- every time it opens, and only ever rewrites what's between the fences.
 hl.config({
   decoration = {
-    dim_inactive = true,
+    dim_inactive = false,
     rounding = 16,
 
     glow = {
@@ -68,19 +68,19 @@ hl.config({
   },
 
   dwindle = {
-    preserve_split = true,
-    smart_split = false,
-    smart_resizing = true,
     force_split = 2,
+    preserve_split = true,
+    smart_resizing = true,
+    smart_split = false,
   },
 
   general = {
     border_size = 1,
+    extend_border_grab_area = 15,
     gaps_in = 1,
     gaps_out = 2,
-    resize_on_border = true,
-    extend_border_grab_area = 15,
     hover_icon_on_border = true,
+    resize_on_border = true,
 
     snap = {
       enabled = true,
@@ -92,7 +92,6 @@ hl.config({
 hl.animation({ leaf = "global", enabled = true, speed = 12.5, bezier = "default" })
 hl.animation({ leaf = "border", enabled = true, speed = 6.74, bezier = "easeOutQuint" })
 hl.animation({ leaf = "windows", enabled = true, speed = 4.74, bezier = "easeOutQuint" })
-hl.animation({ leaf = "windowsMove", enabled = false })
 hl.animation({ leaf = "windowsIn", enabled = true, speed = 5.12, bezier = "easeOutQuint", style = "popin 87%" })
 hl.animation({ leaf = "windowsOut", enabled = true, speed = 1.86, bezier = "linear", style = "popin 87%" })
 hl.animation({ leaf = "fadeIn", enabled = true, speed = 2.16, bezier = "almostLinear" })

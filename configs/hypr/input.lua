@@ -110,6 +110,8 @@ local function cycle_window_monitor(direction)
   end)
 end
 
+
+
 -- 3-finger swipe gestures:
 -- Swipe left: Snap window to left half
 -- Swipe right: Snap window to right half

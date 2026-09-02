@@ -113,6 +113,14 @@ o.bind("XF86Calculator", "Toggle calculator", "toggle-calculator")
 hl.unbind("SUPER + CTRL + Q")
 o.bind("SUPER + CTRL + Q", "Toggle calculator", "toggle-calculator")
 
+-- Toggle AI Agent Tokens and Quota panel
+o.bind("SUPER + U", "Toggle AI agent tokens panel", "toggle-agent-tokens")
+
+-- Launch GitHub Copilot CLI
+o.bind("SUPER + SHIFT + CTRL + C", "GitHub Copilot CLI", "copilot-cli")
+
+
+
 
 
 

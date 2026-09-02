@@ -66,7 +66,7 @@
       ],
       "right": [
         {
-          "id": "omarchy.agents"
+          "id": "subi.agents"
         },
         {
           "id": "omarchy.tray"
@@ -106,7 +106,8 @@
           "id": "jankeesvw.notification-center"
         },
         {
-          "id": "omarchy.power"
+          "id": "omarchy.power",
+          "showPercentage": true
         }
       ]
     },

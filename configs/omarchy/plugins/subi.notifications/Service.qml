@@ -5,6 +5,7 @@ import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
+import Quickshell.Hyprland
 import Quickshell.Services.Notifications
 import qs.Commons
 
@@ -1070,7 +1071,11 @@ Item {
       id: popupWindow
       required property var modelData
       screen: modelData
-      visible: popupModel.count > 0
+      readonly property bool isFocusedScreen: {
+        if (!Hyprland.focusedMonitor) return index === 0
+        return modelData && modelData.name === Hyprland.focusedMonitor.name
+      }
+      visible: popupModel.count > 0 && isFocusedScreen
 
       WlrLayershell.namespace: "omarchy-notifications"
       WlrLayershell.layer: WlrLayer.Overlay

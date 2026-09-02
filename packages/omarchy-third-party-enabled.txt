@@ -1,4 +1,5 @@
 ssupt.audio-control
+subi.agents
 tyrsolution.app-launcher
 tenzin.auto-workspace
 io.github.yogeshojha.blip
