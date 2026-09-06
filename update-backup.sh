@@ -19,6 +19,7 @@ rsync -a --delete ~/.config/systemd/user/    "$REPO_DIR/configs/systemd-user/"
 [ -d ~/.config/kitty ]              && rsync -a --delete ~/.config/kitty/              "$REPO_DIR/configs/kitty/"
 [ -d ~/.config/xournalpp ]          && rsync -a --delete ~/.config/xournalpp/          "$REPO_DIR/configs/xournalpp/"
 [ -f ~/.config/starship.toml ]      && cp ~/.config/starship.toml "$REPO_DIR/configs/"
+[ -d ~/.config/Nextcloud ]          && mkdir -p "$REPO_DIR/configs/Nextcloud" && cp ~/.config/Nextcloud/nextcloud.cfg ~/.config/Nextcloud/sync-exclude.lst "$REPO_DIR/configs/Nextcloud/" 2>/dev/null || true
 
 # Scripts
 rsync -a ~/.local/bin/ "$REPO_DIR/scripts/local-bin/"
