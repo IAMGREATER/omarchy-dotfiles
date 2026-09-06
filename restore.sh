@@ -55,6 +55,7 @@ rsync -a "$REPO_DIR/configs/systemd-user/"        "$USER_HOME/.config/systemd/us
 [ -d "$REPO_DIR/configs/kitty" ]               && rsync -a "$REPO_DIR/configs/kitty/"              "$USER_HOME/.config/kitty/"
 [ -d "$REPO_DIR/configs/xournalpp" ]           && rsync -a "$REPO_DIR/configs/xournalpp/"          "$USER_HOME/.config/xournalpp/"
 [ -f "$REPO_DIR/configs/starship.toml" ]       && cp "$REPO_DIR/configs/starship.toml"             "$USER_HOME/.config/starship.toml"
+[ -d "$REPO_DIR/configs/Nextcloud" ]          && mkdir -p "$USER_HOME/.config/Nextcloud" && cp -n "$REPO_DIR/configs/Nextcloud/"* "$USER_HOME/.config/Nextcloud/" 2>/dev/null || true
 echo "      Done."
 
 # ── STEP 5: Restore custom scripts ───────────────────────────────────────────
