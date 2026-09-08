@@ -6,7 +6,7 @@
   <property name="pressureMultiplier" value="1"/>
   <property name="zoomGesturesEnabled" value="true"/>
   <property name="selectedToolbar" value="All in Copy"/>
-  <property name="lastSavePath" value="/run/media/subi/VAULT/Win Backup 19-08-2025/abdul/Documents/MY FILES/MY WORK/OH/OH Students/Paulo Marcos"/>
+  <property name="lastSavePath" value="/run/media/subi/VAULT/Oxford_Health_OH/1_Students_and_Cohorts/OH Students/Oladipupo"/>
   <property name="lastOpenPath" value=""/>
   <property name="lastImagePath" value=""/>
   <property name="edgePanSpeed" value="20"/>
@@ -215,6 +215,10 @@
       <attribute name="deviceClass" type="int" value="1"/>
       <attribute name="deviceSource" type="int" value="0"/>
     </data>
+    <data name="Weylus Stylus">
+      <attribute name="deviceClass" type="int" value="2"/>
+      <attribute name="deviceSource" type="int" value="1"/>
+    </data>
     <data name="XP-PEN DECO 02 Stylus">
       <attribute name="deviceClass" type="int" value="2"/>
       <attribute name="deviceSource" type="int" value="1"/>
@@ -266,7 +270,7 @@
       <attribute name="size" type="string" value="MEDIUM"/>
     </data>
     <data name="pen">
-      <attribute name="color" type="hex" value="ff3333cc"/>
+      <attribute name="color" type="hex" value="ffff0000"/>
       <attribute name="drawingType" type="string" value="default"/>
       <attribute name="fill" type="int" value="0"/>
       <attribute name="fillAlpha" type="int" value="255"/>

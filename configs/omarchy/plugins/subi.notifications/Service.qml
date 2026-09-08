@@ -57,6 +57,7 @@ Item {
   // and the next read of that role segfaults in QQmlListModel::data. A JS
   // map only holds a wrapper, which degrades to a catchable error instead.
   property var liveRefs: ({})
+  property var recentNotifications: []
 
   // PersistentProperties handles in-process QML reloads. The on-disk
   // notifications.json file is the cross-restart backstop — its `dnd` key
@@ -173,6 +174,28 @@ Item {
       notification.tracked = false
       return
     }
+
+    // Suppress rapid identical duplicate notifications (e.g. from multi-monitor instances or rapid re-triggers)
+    var now = Date.now()
+    service.recentNotifications = (service.recentNotifications || []).filter(function(entry) {
+      return (now - entry.timestamp) < 2500
+    })
+    for (var i = 0; i < service.recentNotifications.length; i++) {
+      var prev = service.recentNotifications[i]
+      if (prev && prev.app === snapshot.app &&
+          prev.summary === snapshot.summary &&
+          prev.body === snapshot.body) {
+        delete liveRefs[snapshot.originalId]
+        notification.tracked = false
+        return
+      }
+    }
+    service.recentNotifications.push({
+      app: snapshot.app,
+      summary: snapshot.summary,
+      body: snapshot.body,
+      timestamp: now
+    })
 
     persistPopupFile(snapshot)
     watchForUpdates(notification, snapshot)
@@ -1072,7 +1095,10 @@ Item {
       required property var modelData
       screen: modelData
       readonly property bool isFocusedScreen: {
-        if (!Hyprland.focusedMonitor) return index === 0
+        if (!Hyprland.focusedMonitor) {
+          var screens = Quickshell.screens || []
+          return screens.length > 0 && modelData === screens[0]
+        }
         return modelData && modelData.name === Hyprland.focusedMonitor.name
       }
       visible: popupModel.count > 0 && isFocusedScreen

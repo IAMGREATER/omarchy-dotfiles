@@ -55,6 +55,8 @@ rsync -a "$REPO_DIR/configs/systemd-user/"        "$USER_HOME/.config/systemd/us
 [ -d "$REPO_DIR/configs/kitty" ]               && rsync -a "$REPO_DIR/configs/kitty/"              "$USER_HOME/.config/kitty/"
 [ -d "$REPO_DIR/configs/xournalpp" ]           && rsync -a "$REPO_DIR/configs/xournalpp/"          "$USER_HOME/.config/xournalpp/"
 [ -d "$REPO_DIR/configs/imv" ]                 && rsync -a "$REPO_DIR/configs/imv/"                "$USER_HOME/.config/imv/"
+[ -d "$REPO_DIR/configs/wireplumber" ]         && rsync -a "$REPO_DIR/configs/wireplumber/"        "$USER_HOME/.config/wireplumber/"
+[ -d "$REPO_DIR/configs/pipewire" ]            && rsync -a "$REPO_DIR/configs/pipewire/"           "$USER_HOME/.config/pipewire/"
 [ -f "$REPO_DIR/configs/starship.toml" ]       && cp "$REPO_DIR/configs/starship.toml"             "$USER_HOME/.config/starship.toml"
 [ -d "$REPO_DIR/configs/Nextcloud" ]          && mkdir -p "$USER_HOME/.config/Nextcloud" && cp -n "$REPO_DIR/configs/Nextcloud/"* "$USER_HOME/.config/Nextcloud/" 2>/dev/null || true
 echo "      Done."
