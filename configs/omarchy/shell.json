@@ -26,13 +26,13 @@
           "id": "eduardodallecort.weather-radar"
         },
         {
-          "audioQuality": "320 kbps",
           "id": "quickshell.ytmusic",
           "idleShutdownMinutes": 15,
-          "searchHistory": "[]",
-          "sessionState": "{\"tab\":\"home\",\"searchText\":\"\",\"libraryType\":\"tracks\",\"libraryFilter\":\"\",\"detailFilter\":\"\",\"detailItem\":null}",
+          "showMiniPlayer": "On",
           "shortcutPlayer": "Omarchy Music app",
-          "showMiniPlayer": "On"
+          "audioQuality": "320 kbps",
+          "searchHistory": "[]",
+          "sessionState": "{\"tab\":\"home\",\"searchText\":\"\",\"libraryType\":\"tracks\",\"libraryFilter\":\"\",\"detailFilter\":\"\",\"detailItem\":null}"
         },
         {
           "id": "omarchy.microphone"
@@ -100,7 +100,7 @@
           "id": "crmne.hyprmoncfg"
         },
         {
-          "id": "omarchy.monitor"
+          "id": "subi.monitor"
         },
         {
           "id": "jankeesvw.notification-center"

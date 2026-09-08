@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+NAME="${1:-}"
+ENABLE="${2:-}"
+
+if [[ -z "$NAME" ]]; then
+  echo "Usage: omarchy-display-toggle <connector_or_name> [on|off|toggle]"
+  exit 1
+fi
+
+PROFILE_JSON=$(ls -t ~/.config/hyprmoncfg/profiles/*.json 2>/dev/null | head -n 1 || true)
+if [[ -n "$PROFILE_JSON" && -f "$PROFILE_JSON" ]]; then
+  # Normalize hyprmoncfg profile output port name to match current kernel connector if needed
+  if [[ "$NAME" == "DP-3" ]]; then
+    sed -i 's/"name": "DP-2"/"name": "DP-3"/g' "$PROFILE_JSON"
+  elif [[ "$NAME" == "DP-2" ]]; then
+    sed -i 's/"name": "DP-3"/"name": "DP-2"/g' "$PROFILE_JSON"
+  fi
+
+  if [[ -z "$ENABLE" || "$ENABLE" == "toggle" ]]; then
+    CURR=$(jq -r --arg n "$NAME" '.outputs[] | select(.name == $n or .description == $n or .key == $n or .match_key == $n) | .enabled' "$PROFILE_JSON")
+    if [[ "$CURR" == "true" ]]; then
+      TARGET=false
+    else
+      TARGET=true
+    fi
+  elif [[ "$ENABLE" == "on" || "$ENABLE" == "true" || "$ENABLE" == "1" ]]; then
+    TARGET=true
+  else
+    TARGET=false
+  fi
+
+  jq --arg n "$NAME" --argjson target "$TARGET" '
+    .outputs |= map(
+      if (.name == $n or .description == $n or .key == $n or .match_key == $n) then
+        .enabled = $target
+      else
+        .
+      end
+    )
+  ' "$PROFILE_JSON" > "${PROFILE_JSON}.tmp" && mv "${PROFILE_JSON}.tmp" "$PROFILE_JSON"
+
+  PROFILE_NAME=$(jq -r '.name' "$PROFILE_JSON")
+  hyprmoncfg apply "$PROFILE_NAME" --confirm-timeout 0
+else
+  if [[ "$ENABLE" == "off" || "$ENABLE" == "false" || "$ENABLE" == "0" ]]; then
+    hyprctl eval "hl.monitor({ output = \"$NAME\", disabled = true })"
+  else
+    hyprctl eval "hl.monitor({ output = \"$NAME\", mode = \"preferred\", position = \"auto\", scale = 1 })"
+  fi
+fi
+
+# Refresh WeazyStroke overlay so layer-shell surfaces and monitor bounds update
+systemctl --user try-restart weazystroke.service 2>/dev/null || true
+
