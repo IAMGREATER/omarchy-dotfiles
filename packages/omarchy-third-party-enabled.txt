@@ -3,6 +3,7 @@ subi.agents
 tyrsolution.app-launcher
 tenzin.auto-workspace
 io.github.yogeshojha.blip
+subi.monitor
 rosakodu.dock
 expose.window-overview
 im0001gt.hw-tooltip
@@ -15,7 +16,6 @@ io.github.twiking.omasettings
 bobbynicholas.omaland
 quickshell.ytmusic
 io.github.brm-src.plugin-control-center
-dizziee.system-updates
 eduardodallecort.weather-radar
 io.github.kristoferlund.webcam
 crmne.hyprmoncfg

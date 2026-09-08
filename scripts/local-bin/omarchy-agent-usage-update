@@ -2,6 +2,12 @@
 USAGE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/agents/usage"
 mkdir -p "$USAGE_DIR"
 
+# Prevent recursive execution
+if [[ -n "${_OMARCHY_AGENT_USAGE_UPDATING:-}" ]]; then
+  exit 0
+fi
+export _OMARCHY_AGENT_USAGE_UPDATING=1
+
 # 1. Run native omarchy-agent-usage-update from /usr/bin if it exists
 if [[ -x /usr/bin/omarchy-agent-usage-update ]]; then
   /usr/bin/omarchy-agent-usage-update "$@"
@@ -11,7 +17,7 @@ fi
 for collector in "$HOME"/.local/bin/omarchy-agent-usage-*; do
   [[ -x "$collector" ]] || continue
   agent="${collector##*/omarchy-agent-usage-}"
-  [[ "$agent" == "update" ]] && continue
+  [[ "$agent" == "update" || "$agent" == "notify" ]] && continue
   
   tmp=$(mktemp "$USAGE_DIR/.$agent.XXXXXX")
   if record=$("$collector" "$@") && [[ -n "$record" ]] && jq -e . >/dev/null 2>&1 <<<"$record"; then

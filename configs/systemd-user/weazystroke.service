@@ -5,10 +5,9 @@ After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/eswl-daemon --overlay --tray
+ExecStart=/home/subi/.local/bin/eswl-daemon --overlay --tray
 Restart=on-failure
 RestartSec=2
-KillMode=process
 
 [Install]
 WantedBy=graphical-session.target

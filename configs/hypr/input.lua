@@ -16,15 +16,22 @@ hl.config({
     float_switch_override_focus = 1,
     mouse_refocus = true,
 
+    -- Increase pointer speed for a faster cursor response.
+    sensitivity = 0.35,
+
     touchpad = {
-      -- Use natural (inverse) scrolling.
-      natural_scroll = true,
+      -- Explicitly enable tap-to-click and tap-and-drag
+      tap_to_click = true,
+      tap_and_drag = true,
+
+      -- Use traditional scrolling direction.
+      natural_scroll = false,
 
       -- Use two-finger clicks for right-click instead of lower-right corner.
       clickfinger_behavior = true,
 
       -- Control the speed of your scrolling.
-      scroll_factor = 0.4,
+      scroll_factor = 0.8,
 
       -- Enable the touchpad while typing.
       disable_while_typing = false,
@@ -36,6 +43,85 @@ hl.config({
 -- o.window("(Alacritty|kitty|foot)", { scroll_touchpad = 1.5 })
 -- o.window("com.mitchellh.ghostty", { scroll_touchpad = 0.2 })
 
+-- 3-finger swipe gestures:
+-- Swipe left: Snap window to left half
+-- Swipe right: Snap window to right half
+-- Swipe up / down: Maximize window / send behind
+hl.gesture({
+  fingers = 3,
+  direction = "left",
+  disable_inhibit = true,
+  action = function()
+    hl.exec_cmd("omarchy-window-snap left")
+  end,
+})
+
+hl.gesture({
+  fingers = 3,
+  direction = "right",
+  disable_inhibit = true,
+  action = function()
+    hl.exec_cmd("omarchy-window-snap right")
+  end,
+})
+
+hl.gesture({
+  fingers = 3,
+  direction = "up",
+  disable_inhibit = true,
+  action = function()
+    hl.exec_cmd("omarchy-window-snap up")
+  end,
+})
+
+hl.gesture({
+  fingers = 3,
+  direction = "down",
+  disable_inhibit = true,
+  action = function()
+    hl.exec_cmd("omarchy-window-send-behind")
+  end,
+})
+
+-- 4-finger swipe gestures:
+-- Swipe up: Toggle Exposé
+-- Swipe down: Toggle Mirador
+-- Swipe left/right: move active window to previous/next monitor
+hl.gesture({
+  fingers = 4,
+  direction = "up",
+  disable_inhibit = true,
+  action = function()
+    hl.dispatch(hl.dsp.exec_cmd("omarchy-shell shell hide mirador; omarchy-shell shell toggle expose.window-overview '{}'"))
+  end,
+})
+
+hl.gesture({
+  fingers = 4,
+  direction = "down",
+  disable_inhibit = true,
+  action = function()
+    hl.dispatch(hl.dsp.exec_cmd("omarchy-shell shell hide expose.window-overview; omarchy-shell shell toggle mirador '{}'"))
+  end,
+})
+
+hl.gesture({
+  fingers = 4,
+  direction = "left",
+  disable_inhibit = true,
+  action = function()
+    hl.dispatch(hl.dsp.exec_cmd("move-window-screen left"))
+  end,
+})
+
+hl.gesture({
+  fingers = 4,
+  direction = "right",
+  disable_inhibit = true,
+  action = function()
+    hl.dispatch(hl.dsp.exec_cmd("move-window-screen right"))
+  end,
+})
 
 -- Function to cycle active window across monitors according to user layout
 local function cycle_window_monitor(direction)
@@ -110,94 +196,6 @@ local function cycle_window_monitor(direction)
   end)
 end
 
-
-
--- 3-finger swipe gestures:
--- Swipe left: Snap window to left half
--- Swipe right: Snap window to right half
--- Swipe up: Cycle window state (Maximized -> Centered Pop-up -> Original)
--- Swipe down: Send window behind
-hl.gesture({
-  fingers = 3,
-  direction = "left",
-  disable_inhibit = true,
-  action = function()
-    hl.dispatch(hl.dsp.exec_cmd("omarchy-window-snap left"))
-  end,
-})
-
-hl.gesture({
-  fingers = 3,
-  direction = "right",
-  disable_inhibit = true,
-  action = function()
-    hl.dispatch(hl.dsp.exec_cmd("omarchy-window-snap right"))
-  end,
-})
-
-hl.gesture({
-  fingers = 3,
-  direction = "up",
-  disable_inhibit = true,
-  action = function()
-    hl.dispatch(hl.dsp.exec_cmd("omarchy-window-snap cycle-up"))
-  end,
-})
-
-hl.gesture({
-  fingers = 3,
-  direction = "down",
-  disable_inhibit = true,
-  action = function()
-    hl.dispatch(hl.dsp.exec_cmd("omarchy-window-send-behind"))
-  end,
-})
-
-
-
-
--- 4-finger swipe gestures:
--- Swipe up: Toggle Exposé (auto-closes Mirador if open)
--- Swipe down: Toggle Mirador (auto-closes Exposé if open)
--- Swipe left: Move active window to previous/left monitor
--- Swipe right: Move active window to next/right monitor
-hl.gesture({
-  fingers = 4,
-  direction = "up",
-  disable_inhibit = true,
-  action = function()
-    hl.dispatch(hl.dsp.exec_cmd("omarchy-shell shell hide mirador; omarchy-shell shell toggle expose.window-overview '{}'"))
-  end,
-})
-
-hl.gesture({
-  fingers = 4,
-  direction = "down",
-  disable_inhibit = true,
-  action = function()
-    hl.dispatch(hl.dsp.exec_cmd("omarchy-shell shell hide expose.window-overview; omarchy-shell shell toggle mirador '{}'"))
-  end,
-})
-
-hl.gesture({
-  fingers = 4,
-  direction = "left",
-  disable_inhibit = true,
-  action = function()
-    hl.dispatch(hl.dsp.exec_cmd("move-window-screen left"))
-  end,
-})
-
-hl.gesture({
-  fingers = 4,
-  direction = "right",
-  disable_inhibit = true,
-  action = function()
-    hl.dispatch(hl.dsp.exec_cmd("move-window-screen right"))
-  end,
-})
-
-
 -- Tablet / Stylus and Cursor configuration
 hl.config({
   cursor = {
@@ -234,5 +232,3 @@ o.window("org.omarchy.xppen-config", {
   center = true,
   size = "720 680",
 })
-
-

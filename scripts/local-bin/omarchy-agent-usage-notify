@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+if [[ -n "${_OMARCHY_AGENT_USAGE_NOTIFYING:-}" ]]; then
+  exit 0
+fi
+export _OMARCHY_AGENT_USAGE_NOTIFYING=1
+
 # Trigger update first so numbers are fresh
 "$HOME/.local/bin/omarchy-agent-usage-update" --limits-only 2>/dev/null
 

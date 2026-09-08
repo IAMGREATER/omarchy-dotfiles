@@ -2,3 +2,17 @@
 -- Every value here was set from the OmaSettings window; delete a line
 -- to hand that setting back to your own config.
 
+hl.config({
+  input = {
+    touchpad = {
+      scroll_factor = 1.00,
+    },
+  },
+})
+
+hl.device({
+  name = "hailuck-co.-ltd-usb-touch-touchpad",
+  natural_scroll = true,
+  scroll_factor = 1.60,
+})
+
