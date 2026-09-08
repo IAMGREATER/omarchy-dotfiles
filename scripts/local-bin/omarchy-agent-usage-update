@@ -11,7 +11,7 @@ fi
 for collector in "$HOME"/.local/bin/omarchy-agent-usage-*; do
   [[ -x "$collector" ]] || continue
   agent="${collector##*/omarchy-agent-usage-}"
-  [[ "$agent" == "update" ]] && continue
+  [[ "$agent" == "update" || "$agent" == "notify" ]] && continue
   
   tmp=$(mktemp "$USAGE_DIR/.$agent.XXXXXX")
   if record=$("$collector" "$@") && [[ -n "$record" ]] && jq -e . >/dev/null 2>&1 <<<"$record"; then

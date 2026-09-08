@@ -9,24 +9,26 @@ DATE=$(date +%d-%m-%Y)
 echo "Syncing latest configs..."
 
 # Configs
-rsync -a --delete ~/.config/hypr/            "$REPO_DIR/configs/hypr/"
-rsync -a --delete ~/.config/omarchy/         "$REPO_DIR/configs/omarchy/"
-rsync -a --delete ~/.config/systemd/user/    "$REPO_DIR/configs/systemd-user/"
-[ -d ~/.config/easystroke-wayland ] && rsync -a --delete ~/.config/easystroke-wayland/ "$REPO_DIR/configs/easystroke-wayland/"
-[ -d ~/.config/voxtype ]            && rsync -a --delete ~/.config/voxtype/            "$REPO_DIR/configs/voxtype/"
-[ -d ~/.config/alacritty ]          && rsync -a --delete ~/.config/alacritty/          "$REPO_DIR/configs/alacritty/"
-[ -d ~/.config/ghostty ]            && rsync -a --delete ~/.config/ghostty/            "$REPO_DIR/configs/ghostty/"
-[ -d ~/.config/kitty ]              && rsync -a --delete ~/.config/kitty/              "$REPO_DIR/configs/kitty/"
-[ -d ~/.config/xournalpp ]          && rsync -a --delete ~/.config/xournalpp/          "$REPO_DIR/configs/xournalpp/"
-[ -d ~/.config/imv ]                && rsync -a --delete ~/.config/imv/                "$REPO_DIR/configs/imv/"
+rsync -a --delete --exclude='*.bak*' ~/.config/hypr/            "$REPO_DIR/configs/hypr/"
+rsync -a --delete --exclude='*.bak*' ~/.config/omarchy/         "$REPO_DIR/configs/omarchy/"
+rsync -a --delete --exclude='*.bak*' ~/.config/systemd/user/    "$REPO_DIR/configs/systemd-user/"
+[ -d ~/.config/easystroke-wayland ] && rsync -a --delete --exclude='*.bak*' ~/.config/easystroke-wayland/ "$REPO_DIR/configs/easystroke-wayland/"
+[ -d ~/.config/voxtype ]            && rsync -a --delete --exclude='*.bak*' ~/.config/voxtype/            "$REPO_DIR/configs/voxtype/"
+[ -d ~/.config/alacritty ]          && rsync -a --delete --exclude='*.bak*' ~/.config/alacritty/          "$REPO_DIR/configs/alacritty/"
+[ -d ~/.config/ghostty ]            && rsync -a --delete --exclude='*.bak*' ~/.config/ghostty/            "$REPO_DIR/configs/ghostty/"
+[ -d ~/.config/kitty ]              && rsync -a --delete --exclude='*.bak*' ~/.config/kitty/              "$REPO_DIR/configs/kitty/"
+[ -d ~/.config/xournalpp ]          && rsync -a --delete --exclude='*.bak*' ~/.config/xournalpp/          "$REPO_DIR/configs/xournalpp/"
+[ -d ~/.config/imv ]                && rsync -a --delete --exclude='*.bak*' ~/.config/imv/                "$REPO_DIR/configs/imv/"
 [ -f ~/.config/starship.toml ]      && cp ~/.config/starship.toml "$REPO_DIR/configs/"
+[ -d ~/.config/wireplumber ]        && rsync -a --delete --exclude='*.bak*' ~/.config/wireplumber/        "$REPO_DIR/configs/wireplumber/"
+[ -d ~/.config/pipewire ]           && rsync -a --delete --exclude='*.bak*' ~/.config/pipewire/           "$REPO_DIR/configs/pipewire/"
 [ -d ~/.config/Nextcloud ]          && mkdir -p "$REPO_DIR/configs/Nextcloud" && cp ~/.config/Nextcloud/nextcloud.cfg ~/.config/Nextcloud/sync-exclude.lst "$REPO_DIR/configs/Nextcloud/" 2>/dev/null || true
 
 # Scripts
 rsync -a ~/.local/bin/ "$REPO_DIR/scripts/local-bin/"
 find "$REPO_DIR/scripts/local-bin/" -name "*.bak*" -delete
-cp ~/.zshrc        "$REPO_DIR/scripts/zshrc"        2>/dev/null || true
-cp ~/.bashrc       "$REPO_DIR/scripts/bashrc"       2>/dev/null || true
+[ -f ~/.zshrc ]        && sed -E 's/(.*(KEY|TOKEN|SECRET).*=).*/\1"YOUR_SECRET_HERE"/' ~/.zshrc > "$REPO_DIR/scripts/zshrc" || true
+[ -f ~/.bashrc ]       && sed -E 's/(.*(KEY|TOKEN|SECRET).*=).*/\1"YOUR_SECRET_HERE"/' ~/.bashrc > "$REPO_DIR/scripts/bashrc" || true
 cp ~/.bash_profile "$REPO_DIR/scripts/bash_profile" 2>/dev/null || true
 
 # Package lists
