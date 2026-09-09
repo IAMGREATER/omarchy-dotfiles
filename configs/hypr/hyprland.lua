@@ -10,6 +10,9 @@ dofile((os.getenv("OMARCHY_PATH") or "/usr/share/omarchy") .. "/default/hypr/boo
 -- keeping core window-manager bindings:
 -- omarchy_preinstalled_bindings = false
 
+-- Prevent Omarchy default browser rules from moving screen sharing notifications to special workspace
+package.loaded["default.hypr.apps.browser"] = true
+
 -- Load Omarchy defaults.
 require("default.hypr.omarchy")
 
@@ -28,6 +31,7 @@ require("default.hypr.toggles")
 
 -- Add any other personal Hyprland configuration below.
 -- o.window("qemu", { workspace = "5" })
+hl.env("OMARCHY_SCREENSHOT_DIR", (os.getenv("HOME") or "/home/subi") .. "/Pictures/Screenshots")
 
 -- Load settings written by OmaSettings (omasettings:managed).
 require("hypr.omasettings")

@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+EXISTING=$(hyprctl monitors -j | jq -r '.[] | select(.name | startswith("HEADLESS")) | .name' | head -n1)
+
+create_monitor() {
+  hyprctl output create headless >/dev/null
+  sleep 0.15
+  NEW_MON=$(hyprctl monitors -j | jq -r '.[] | select(.name | startswith("HEADLESS")) | .name' | head -n1)
+  if [[ -n "$NEW_MON" ]]; then
+    hyprctl eval "hl.monitor({ output = \"$NEW_MON\", mode = \"1372x980@60\", position = \"1234x2280\", scale = 1 })" >/dev/null
+    hyprctl eval "hl.device({ name = \"weylus-stylus\", output = \"$NEW_MON\" }); hl.device({ name = \"weylus-touch\", output = \"$NEW_MON\" }); hl.device({ name = \"weylus-mouse\", output = \"$NEW_MON\" })" >/dev/null
+    notify-send -a "Tablet Display" "Virtual Monitor Active" "$NEW_MON (1372x980, 7:5 ratio, scale 1) under laptop screen"
+  fi
+}
+
+remove_monitor() {
+  if [[ -n "$EXISTING" ]]; then
+    hyprctl output remove "$EXISTING" >/dev/null
+    # Reset weylus stylus/touch fallback
+    hyprctl eval '
+      local target = "eDP-1"
+      for _, m in ipairs(hl.get_monitors()) do
+        if m.name:find("HDMI") then target = m.name; break end
+      end
+      hl.device({ name = "weylus-stylus", output = target })
+      hl.device({ name = "weylus-touch", output = target })
+      hl.device({ name = "weylus-mouse", output = target })
+    ' >/dev/null 2>&1 || true
+    notify-send -a "Tablet Display" "Virtual Monitor Removed" "Removed $EXISTING"
+  else
+    echo "No headless monitor active."
+  fi
+}
+
+case "${1:-toggle}" in
+  start|create)
+    if [[ -z "$EXISTING" ]]; then
+      create_monitor
+    else
+      echo "Virtual monitor $EXISTING already active."
+    fi
+    ;;
+  stop|remove)
+    remove_monitor
+    ;;
+  toggle)
+    if [[ -n "$EXISTING" ]]; then
+      remove_monitor
+    else
+      create_monitor
+    fi
+    ;;
+  status)
+    if [[ -n "$EXISTING" ]]; then
+      echo "Active: $EXISTING"
+      hyprctl monitors -j | jq '.[] | select(.name | startswith("HEADLESS"))'
+    else
+      echo "No headless monitor active."
+    fi
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|toggle|status}"
+    exit 1
+    ;;
+esac

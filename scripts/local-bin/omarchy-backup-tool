@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 import os
+import re
 import sys
+import json
+import socket
 import subprocess
 import threading
 import glob
@@ -32,6 +35,7 @@ BACKUP_CATEGORIES = [
         "source": os.path.expanduser("~/.config/hypr"),
         "dest_sub": "configs/hypr",
         "restore_dest": os.path.expanduser("~/.config/hypr"),
+        "exclude": ["*.bak*"],
         "default": True,
     },
     {
@@ -46,6 +50,7 @@ BACKUP_CATEGORIES = [
             "plugins/*/node_modules",
             "blip/data",
             "*.lock",
+            "*.bak*",
         ],
         "default": True,
     },
@@ -118,6 +123,7 @@ BACKUP_CATEGORIES = [
             (os.path.expanduser("~/.bash_profile"), "scripts/bash_profile", os.path.expanduser("~/.bash_profile")),
             (os.path.expanduser("~/.config/starship.toml"), "configs/starship.toml", os.path.expanduser("~/.config/starship.toml")),
         ],
+        "scrub_secrets": True,
         "default": True,
     },
     {
@@ -321,6 +327,7 @@ class BackupWindow(Adw.ApplicationWindow):
 
         self.status_label = Gtk.Label(label="Ready to backup.")
         self.status_label.set_xalign(0.0)
+        self.status_label.set_wrap(True)
         self.status_label.set_margin_top(8)
         self.status_label.set_wrap(True)
         self.log_group.add(self.status_label)
@@ -406,6 +413,7 @@ class BackupWindow(Adw.ApplicationWindow):
 
         self.restore_status_label = Gtk.Label(label="Select a source and items to restore.")
         self.restore_status_label.set_xalign(0.0)
+        self.restore_status_label.set_wrap(True)
         self.restore_status_label.set_margin_top(8)
         self.restore_status_label.set_wrap(True)
         self.restore_log_group.add(self.restore_status_label)
@@ -621,7 +629,14 @@ class BackupWindow(Adw.ApplicationWindow):
         idx = row.get_selected()
         if 0 <= idx < len(self.source_paths):
             src = self.source_paths[idx]
-            self.restore_status_label.set_text(f"Selected source: {src}")
+            # Show machine ID from backup if present
+            mid_file = os.path.join(src, ".machine-id")
+            if os.path.isfile(mid_file):
+                with open(mid_file) as f:
+                    mid = f.read().strip()
+                self.restore_status_label.set_text(f"Source: {src}\nMachine: {mid}")
+            else:
+                self.restore_status_label.set_text(f"Selected source: {src}")
 
     def on_custom_toggle(self, sw, param):
         active = sw.get_active()
@@ -660,7 +675,7 @@ class BackupWindow(Adw.ApplicationWindow):
 
         selected_items = [cid for cid, sw in self.switches.items() if sw.get_active()]
         if not selected_items:
-            self.status_label.set_text("⚠️ Please select at least one item to backup.")
+            self.status_label.set_text("Please select at least one item to backup.")
             return
 
         self.backup_btn.set_sensitive(False)
@@ -694,6 +709,8 @@ class BackupWindow(Adw.ApplicationWindow):
 
     def run_backup(self, dest_gh, dest_omarchy_backups, dest_vault, dest_custom, selected_items):
         try:
+            self._cfg = load_config()
+            machine_id = (self._cfg.get("machine_id", "") or socket.gethostname()).strip()
             date_str = datetime.now().strftime("%d-%m-%Y")
             repo = self.repo_dir
             os.makedirs(repo, exist_ok=True)
@@ -733,11 +750,15 @@ class BackupWindow(Adw.ApplicationWindow):
                             subprocess.run(cmd)
 
                 elif "files" in cat:
+                    scrub = cat.get("scrub_secrets", False)
                     for fpath, sub, _ in cat["files"]:
                         if os.path.exists(fpath):
                             dst_file = os.path.join(repo, sub)
                             os.makedirs(os.path.dirname(dst_file), exist_ok=True)
-                            subprocess.run(["cp", fpath, dst_file])
+                            if scrub:
+                                scrub_and_copy(fpath, dst_file)
+                            else:
+                                subprocess.run(["cp", fpath, dst_file])
 
                 elif cat.get("generator"):
                     pkg_dir = os.path.join(repo, "packages")
@@ -780,7 +801,7 @@ class BackupWindow(Adw.ApplicationWindow):
                         capture_output=True, text=True
                     )
                     if push_res.returncode == 0:
-                        gh_msg = " • Pushed latest changes to GitHub"
+                        gh_msg = f" • Pushed to GitHub [{machine_id}]"
                     else:
                         err = push_res.stderr.strip()
                         if "could not read Username" in err or "Authentication" in err or "credentials" in err.lower():
@@ -826,20 +847,20 @@ class BackupWindow(Adw.ApplicationWindow):
             self.finish_backup(True, final_msg)
 
         except Exception as e:
-            self.finish_backup(False, f"❌ Backup error: {str(e)}")
+            self.finish_backup(False, f"Backup error: {str(e)}")
 
     # -----------------------------------------------------------------------
     def on_start_restore(self, btn):
         idx = self.source_row.get_selected()
         if idx < 0 or idx >= len(self.source_paths):
-            self.restore_status_label.set_text("⚠️ Invalid restore source selected.")
+            self.restore_status_label.set_text("Invalid restore source selected.")
             return
 
         source_dir = self.source_paths[idx]
         selected_items = [cid for cid, sw in self.restore_switches.items() if sw.get_active()]
 
         if not selected_items:
-            self.restore_status_label.set_text("⚠️ Please select at least one item to restore.")
+            self.restore_status_label.set_text("Please select at least one item to restore.")
             return
 
         self.restore_btn.set_sensitive(False)
@@ -922,10 +943,14 @@ class BackupWindow(Adw.ApplicationWindow):
             subprocess.run(["systemctl", "--user", "restart", "weazystroke.service"], capture_output=True)
             subprocess.run(["hyprctl", "reload"], capture_output=True)
 
-            self.finish_restore(True, f"✅ Selected items restored successfully from:\n{source_dir}")
+            src_label = source_dir
+            if source_machine:
+                src_label += f"\nMachine: {source_machine}"
+            self.finish_restore(True, f"Selected items restored successfully from:\n{src_label}")
 
         except Exception as e:
-            self.finish_restore(False, f"❌ Restore error: {str(e)}")
+            self.finish_restore(False, f"Restore error: {str(e)}")
+
 
 
 if __name__ == "__main__":
