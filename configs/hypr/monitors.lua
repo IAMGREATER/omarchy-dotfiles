@@ -17,5 +17,9 @@ hl.workspace_rule({ workspace = "2", monitor = "desc:Iiyama North America PL2530
 -- Bottom-center: Laptop display
 --hl.monitor({ output = "eDP-1", mode = "preferred", position = "960x1080", scale = omarchy_monitor_scale })
 
+-- Virtual / Dummy HDMI tablet display: OnePlus Pad (7:5 ratio), matching laptop height (1200) with narrower width (1680), centered below laptop
+hl.monitor({ output = "HDMI-A-1", mode = "1680x1200@60", position = "1080x2280", scale = 1 })
+hl.monitor({ output = "HEADLESS-[0-9]+", mode = "1680x1200@60", position = "1080x2280", scale = 1 })
+
 -- Fallback for any other / unconfigured displays
 hl.monitor({ output = "", mode = "preferred", position = "auto", scale = omarchy_monitor_scale })

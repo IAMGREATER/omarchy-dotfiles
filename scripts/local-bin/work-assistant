@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+export GEMINI_API_KEY="${GEMINI_API_KEY:-AQ.Ab8RN6LqL3bvzS8dLwgsN8rROEhJ-UUHkmNVimm2Lg_8oWLeIA}"
+exec /home/subi/.local/share/work-assistant-venv/bin/python /home/subi/.local/share/work-assistant/gui.py "$@"

@@ -66,10 +66,10 @@
       ],
       "right": [
         {
-          "id": "subi.agents"
+          "id": "omarchy.tray"
         },
         {
-          "id": "omarchy.tray"
+          "id": "subi.agents"
         },
         {
           "id": "rosakodu.dock"
