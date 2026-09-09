@@ -1,0 +1,14 @@
+[Unit]
+Description=XP-Pen Tablet Control Service
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/xppen-wheel-scroll
+Restart=always
+RestartSec=2
+KillMode=process
+
+[Install]
+WantedBy=graphical-session.target
