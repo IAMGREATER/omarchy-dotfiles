@@ -1,0 +1,67 @@
+-- Personal Window Rules for Omarchy / Hyprland
+
+-- 1. Utility & Dialog Windows (Auto-Floating & Centered)
+-- Calculators
+o.window("^(kcalc|org.kde.kcalc|gnome-calculator|org.gnome.Calculator|omacalc)$", {
+  float = true,
+  center = true,
+  size = { 420, 560 },
+})
+
+-- Audio & Network Mixers
+o.window("^(pavucontrol|org.pulseaudio.pavucontrol)$", {
+  float = true,
+  center = true,
+  size = { 760, 520 },
+})
+
+o.window("^(blueman-manager|.blueman-manager-wrapped)$", {
+  float = true,
+  center = true,
+  size = { 700, 480 },
+})
+
+o.window("^nm-connection-editor$", {
+  float = true,
+  center = true,
+  size = { 650, 500 },
+})
+
+-- Image & Quick Viewers
+o.window("^(imv|loupe|eog|org.gnome.Loupe)$", {
+  float = true,
+  center = true,
+  size = { 900, 650 },
+})
+
+-- Gesture & System Configuration GUIs
+o.window("^(eswl-config|WeazyStroke)$", {
+  float = true,
+  center = true,
+  size = { 850, 600 },
+})
+
+-- Polkit Authentication Prompts
+o.window("^(polkit-gnome-authentication-agent-1|polkit-kde-authentication-agent-1|org.kde.polkit-kde-authentication-agent-1)$", {
+  float = true,
+  center = true,
+  stay_focused = true,
+})
+
+-- 2. Picture-in-Picture (PiP) Video Rules
+o.window({ title = "(Picture.?in.?[Pp]icture|Picture-in-Picture|pip)" }, {
+  float = true,
+  pin = true,
+  keep_aspect_ratio = true,
+  size = { 560, 315 },
+})
+
+-- 3. Media & Video Call Idle Prevention (Keep screen awake during meetings/video)
+o.window("^(zoom|us.zoom.Zoom|vlc|org.videolan.vlc|skype|com.skype.Client)$", {
+  idle_inhibit = "focus",
+})
+
+-- 4. Stylus & Whiteboarding Canvas Setup (Open maximized ready for pen)
+o.window("^(xournalpp|com.github.xournalpp.xournalpp|ch.openboard.OpenBoard|openboard)$", {
+  fullscreen = 1,
+})

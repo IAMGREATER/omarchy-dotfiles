@@ -1,0 +1,139 @@
+-- Keep only your personal input overrides here. Uncommented settings below
+-- replace Omarchy's defaults.
+
+-- Keyboard layout and options.
+-- See https://wiki.hypr.land/Configuring/Basics/Variables/#input
+-- hl.config({
+--   input = {
+--     -- Use multiple keyboard layouts and switch between them with Left Alt + Right Alt.
+--     kb_layout = "us,dk,eu",
+     kb_options = "compose:ralt",ashift:both_capslock_cancel,grp:alts_toggle",
+--
+--     -- Use a specific keyboard variant if needed (e.g. intl for international keyboards).
+--     kb_variant = "intl",
+--
+--     -- Change speed of keyboard repeat.
+--     repeat_rate = 40,
+--     repeat_delay = 250,
+--
+--     -- Start with numlock on by default.
+     numlock_by_default = true,
+--
+--     -- Increase sensitivity for mouse/trackpad (default: 0).
+     sensitivity = 0.35,
+--
+--     -- Turn off mouse acceleration (default: adaptive).
+--     accel_profile = "flat",
+--
+--     touchpad = {
+--       -- Use natural (inverse) scrolling.
+--       natural_scroll = true,
+--
+--       -- Use two-finger clicks for right-click instead of lower-right corner.
+--       clickfinger_behavior = true,
+--
+--       -- Control the speed of your scrolling.
+--       scroll_factor = 0.4,
+--
+--       -- Enable the touchpad while typing.
+--       disable_while_typing = false,
+--
+--       -- Left-click-and-drag with three fingers.
+--       drag_3fg = 1,
+--     },
+--   },
+-- })
+
+-- App-specific touchpad scroll speeds.
+-- o.window("(Alacritty|kitty|foot)", { scroll_touchpad = 1.5 })
+-- o.window("com.mitchellh.ghostty", { scroll_touchpad = 0.2 })
+
+-- 4-finger swipe gestures to move windows across monitors safely:
+-- Swipe up moves active window to upper monitor (e.g. Acer / Iiyama)
+-- Swipe down moves active window to lower monitor (e.g. laptop)
+-- Swipe left moves active window to left monitor (e.g. Acer)
+-- Swipe right moves active window to right monitor (e.g. Iiyama)
+local function get_monitor_logical_box(m)
+  local scale = m.scale or 1.0
+  return {
+    name = m.name,
+    x1 = m.x,
+    y1 = m.y,
+    x2 = m.x + (m.width / scale),
+    y2 = m.y + (m.height / scale),
+  }
+end
+
+local function safe_move_window_to_monitor(dir)
+  pcall(function()
+    local win = hl.get_active_window()
+    if not win then return end
+
+    local cur_mon = hl.get_active_monitor()
+    if not cur_mon then return end
+
+    local cur = get_monitor_logical_box(cur_mon)
+    local mons = hl.get_monitors()
+    local has_target = false
+
+    for _, m in ipairs(mons) do
+      if m.name ~= cur.name then
+        local b = get_monitor_logical_box(m)
+        local y_overlap = (b.y1 < cur.y2 - 1) and (b.y2 > cur.y1 + 1)
+        local x_overlap = (b.x1 < cur.x2 - 1) and (b.x2 > cur.x1 + 1)
+
+        if dir == "u" and b.y2 <= cur.y1 + 1 and x_overlap then
+          has_target = true
+          break
+        elseif dir == "d" and b.y1 >= cur.y2 - 1 and x_overlap then
+          has_target = true
+          break
+        elseif dir == "l" and b.x2 <= cur.x1 + 1 and y_overlap then
+          has_target = true
+          break
+        elseif dir == "r" and b.x1 >= cur.x2 - 1 and y_overlap then
+          has_target = true
+          break
+        end
+      end
+    end
+
+    if not has_target then return end
+
+    hl.dispatch(hl.dsp.window.move({ monitor = dir }))
+  end)
+end
+
+hl.gesture({ fingers = 4, direction = "up", action = function() safe_move_window_to_monitor("u") end })
+hl.gesture({ fingers = 4, direction = "down", action = function() safe_move_window_to_monitor("d") end })
+hl.gesture({ fingers = 4, direction = "left", action = function() safe_move_window_to_monitor("l") end })
+hl.gesture({ fingers = 4, direction = "right", action = function() safe_move_window_to_monitor("r") end })
+
+-- Tablet / Stylus and Cursor configuration to prevent erratic jumping and multi-monitor interference
+hl.config({
+  cursor = {
+    warp_back_after_non_mouse_input = true,
+    hide_on_tablet = true,
+    hide_on_touch = true,
+  },
+  input = {
+    tablet = {
+      output = "eDP-1",
+    },
+    touchdevice = {
+      output = "eDP-1",
+    },
+  },
+})
+
+-- Map laptop touchscreen pen/stylus and finger touch directly to the laptop display (eDP-1)
+hl.device({
+  name = "wacom-hid-5365-pen",
+  output = "eDP-1",
+})
+hl.device({
+  name = "wacom-hid-5365-finger",
+  output = "eDP-1",
+})
+
+
