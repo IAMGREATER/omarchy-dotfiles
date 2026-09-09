@@ -19,6 +19,7 @@ from gi.repository import Gtk, Adw, GLib, Gio
 # Machine identifier – embedded in commit messages so you know which PC backed up
 # ---------------------------------------------------------------------------
 MACHINE_ID = socket.gethostname()
+MACHINE_BRANCH = f"machine/{re.sub(r'[^A-Za-z0-9._-]+', '-', MACHINE_ID).strip('-') or 'unknown'}"
 
 # ---------------------------------------------------------------------------
 # Keyring attribute keys
@@ -172,6 +173,42 @@ def ensure_git_credential_helper(repo_dir):
         ["git", "-C", repo_dir, "config", "credential.helper", helper_path],
         capture_output=True
     )
+
+
+def ensure_machine_branch(repo_dir):
+    """Keep each host's backup history isolated from the shared main branch."""
+    current = subprocess.run(
+        ["git", "-C", repo_dir, "branch", "--show-current"],
+        capture_output=True, text=True, check=True
+    ).stdout.strip()
+    if current == MACHINE_BRANCH:
+        return
+    if current != "main":
+        raise RuntimeError(
+            f"Backup repository is on '{current}', expected '{MACHINE_BRANCH}' or 'main'."
+        )
+
+    local_branch = subprocess.run(
+        ["git", "-C", repo_dir, "show-ref", "--verify", "--quiet",
+         f"refs/heads/{MACHINE_BRANCH}"]
+    )
+    if local_branch.returncode == 0:
+        subprocess.run(["git", "-C", repo_dir, "switch", MACHINE_BRANCH], check=True)
+        return
+
+    remote_branch = subprocess.run(
+        ["git", "-C", repo_dir, "ls-remote", "--exit-code", "--heads", "origin",
+         MACHINE_BRANCH],
+        capture_output=True, text=True
+    )
+    if remote_branch.returncode == 0:
+        subprocess.run(["git", "-C", repo_dir, "fetch", "origin", MACHINE_BRANCH], check=True)
+        subprocess.run(
+            ["git", "-C", repo_dir, "switch", "--track", f"origin/{MACHINE_BRANCH}"],
+            check=True
+        )
+    else:
+        subprocess.run(["git", "-C", repo_dir, "switch", "-c", MACHINE_BRANCH], check=True)
 
 
 # ---------------------------------------------------------------------------
@@ -720,6 +757,7 @@ class BackupWindow(Adw.ApplicationWindow):
 
             if dest_gh:
                 ensure_git_credential_helper(repo)
+                ensure_machine_branch(repo)
 
             for cat in BACKUP_CATEGORIES:
                 cid = cat["id"]
@@ -797,7 +835,7 @@ class BackupWindow(Adw.ApplicationWindow):
                     commit_msg = f"Backup update {date_str} [{MACHINE_ID}]"
                     subprocess.run(["git", "-C", repo, "commit", "-m", commit_msg])
                     push_res = subprocess.run(
-                        ["git", "-C", repo, "push", "origin", "main"],
+                        ["git", "-C", repo, "push", "--set-upstream", "origin", MACHINE_BRANCH],
                         capture_output=True, text=True
                     )
                     if push_res.returncode == 0:
@@ -893,7 +931,11 @@ class BackupWindow(Adw.ApplicationWindow):
             if source_dir == self.repo_dir:
                 self.update_restore_status("Pulling latest commits from GitHub...", 0.05)
                 ensure_git_credential_helper(self.repo_dir)
-                subprocess.run(["git", "-C", self.repo_dir, "pull", "origin", "main"])
+                ensure_machine_branch(self.repo_dir)
+                subprocess.run(
+                    ["git", "-C", self.repo_dir, "pull", "--ff-only", "origin", MACHINE_BRANCH],
+                    check=True
+                )
 
             total_steps = len(selected_items) + 2
             cur_step = 0
