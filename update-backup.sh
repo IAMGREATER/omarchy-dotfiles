@@ -47,6 +47,9 @@ current_branch=$(git branch --show-current)
 if [ "$current_branch" = "main" ]; then
     if git show-ref --verify --quiet "refs/heads/$MACHINE_BRANCH"; then
         git switch "$MACHINE_BRANCH"
+    elif git ls-remote --exit-code --heads origin "$MACHINE_BRANCH" >/dev/null 2>&1; then
+        git fetch origin "$MACHINE_BRANCH"
+        git switch --track "origin/$MACHINE_BRANCH"
     else
         git switch -c "$MACHINE_BRANCH"
     fi
