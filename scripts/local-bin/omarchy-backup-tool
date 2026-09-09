@@ -7,7 +7,6 @@ import socket
 import subprocess
 import threading
 import glob
-import socket
 from datetime import datetime
 import gi
 
@@ -172,6 +171,35 @@ def ensure_git_credential_helper(repo_dir):
         ["git", "-C", repo_dir, "config", "credential.helper", helper_path],
         capture_output=True
     )
+
+
+# ---------------------------------------------------------------------------
+# Secret scrubbing
+# ---------------------------------------------------------------------------
+SECRET_PATTERN = re.compile(
+    r'(.*(KEY|TOKEN|SECRET|PASSWORD|PASS|PWD|API|AUTH|CREDENTIAL|GH_|GITHUB_).*=).*',
+    re.IGNORECASE,
+)
+
+
+def scrub_secrets(content):
+    lines = []
+    for line in content.splitlines(keepends=True):
+        match = SECRET_PATTERN.match(line)
+        if match:
+            newline = "\n" if line.endswith("\n") else ""
+            lines.append(f'{match.group(1)}"YOUR_SECRET_HERE"{newline}')
+        else:
+            lines.append(line)
+    return "".join(lines)
+
+
+def scrub_and_copy(src_path, dst_path):
+    with open(src_path, "r", errors="replace") as source:
+        cleaned = scrub_secrets(source.read())
+    os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+    with open(dst_path, "w") as destination:
+        destination.write(cleaned)
 
 
 # ---------------------------------------------------------------------------
@@ -709,11 +737,10 @@ class BackupWindow(Adw.ApplicationWindow):
 
     def run_backup(self, dest_gh, dest_omarchy_backups, dest_vault, dest_custom, selected_items):
         try:
-            self._cfg = load_config()
-            machine_id = (self._cfg.get("machine_id", "") or socket.gethostname()).strip()
             date_str = datetime.now().strftime("%d-%m-%Y")
             repo = self.repo_dir
             os.makedirs(repo, exist_ok=True)
+            machine_id = MACHINE_ID
 
             total_steps = len(selected_items) + 4
             cur_step = 0
@@ -786,6 +813,8 @@ class BackupWindow(Adw.ApplicationWindow):
                 subprocess.run(["find", bin_target, "-name", "*.bak*", "-delete"])
                 subprocess.run(["find", bin_target, "-name", "__pycache__", "-exec", "rm", "-rf", "{}", "+"])
                 subprocess.run(["rm", "-f", os.path.join(bin_target, "agy")])
+            with open(os.path.join(repo, ".machine-id"), "w") as f:
+                f.write(f"{machine_id}\n")
 
             gh_msg = ""
             if dest_gh:
@@ -890,6 +919,12 @@ class BackupWindow(Adw.ApplicationWindow):
 
     def run_restore(self, source_dir, selected_items):
         try:
+            source_machine = ""
+            mid_file = os.path.join(source_dir, ".machine-id")
+            if os.path.isfile(mid_file):
+                with open(mid_file) as f:
+                    source_machine = f.read().strip()
+
             if source_dir == self.repo_dir:
                 self.update_restore_status("Pulling latest commits from GitHub...", 0.05)
                 ensure_git_credential_helper(self.repo_dir)
