@@ -1,6 +1,0 @@
-[Unit]
-Description=15:00 Tablet Mode, AI Agent Speak & DeepSeek Harness Reminder Service
-
-[Service]
-Type=oneshot
-ExecStart=/usr/share/omarchy/bin/omarchy-notification-send -g "󰢌" "Reminder" "Set up Tablet Mode & On-Screen Keyboard on Yoga 16, AI agent speak option, and DeepSeek harness"
