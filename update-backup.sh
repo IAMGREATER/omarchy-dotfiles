@@ -5,6 +5,9 @@
 set -e
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DATE=$(date +%d-%m-%Y)
+MACHINE_ID=$(hostname)
+MACHINE_BRANCH="machine/$(printf '%s' "$MACHINE_ID" | sed 's/[^A-Za-z0-9._-]/-/g; s/^-*//; s/-*$//')"
+[ -n "$MACHINE_BRANCH" ] || MACHINE_BRANCH="machine/unknown"
 
 echo "Syncing latest configs..."
 
@@ -40,10 +43,21 @@ cp ~/.config/mise/config.toml "$REPO_DIR/packages/mise-tools.toml" 2>/dev/null |
 
 echo "Committing and pushing to GitHub..."
 cd "$REPO_DIR"
+current_branch=$(git branch --show-current)
+if [ "$current_branch" = "main" ]; then
+    if git show-ref --verify --quiet "refs/heads/$MACHINE_BRANCH"; then
+        git switch "$MACHINE_BRANCH"
+    else
+        git switch -c "$MACHINE_BRANCH"
+    fi
+elif [ "$current_branch" != "$MACHINE_BRANCH" ]; then
+    echo "Refusing to back up from unexpected branch: $current_branch" >&2
+    exit 1
+fi
 git add -A
 git diff --cached --quiet && echo "Nothing changed — backup already up to date." && exit 0
-git commit -m "Backup update ${DATE}"
-git push origin main
+git commit -m "Backup update ${DATE} [${MACHINE_ID}]"
+git push --set-upstream origin "$MACHINE_BRANCH"
 
 echo ""
-echo "✅ Backup pushed to https://github.com/IAMGREATER/omarchy-dotfiles"
+echo "✅ Backup pushed to https://github.com/IAMGREATER/omarchy-dotfiles (${MACHINE_BRANCH})"
