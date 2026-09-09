@@ -8,12 +8,3 @@ hl.monitor({
   sdr_min_luminance = 0.2,
   sdr_max_luminance = 80,
 })
-
-hl.monitor({
-  output = "desc:Iiyama North America PL2530H 1154390701104",
-  mode = "1920x1080@60.00",
-  position = "1920x0",
-  scale = 1,
-  sdr_min_luminance = 0.2,
-  sdr_max_luminance = 80,
-})
