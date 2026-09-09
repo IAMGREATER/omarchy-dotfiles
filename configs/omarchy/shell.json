@@ -26,13 +26,13 @@
           "id": "eduardodallecort.weather-radar"
         },
         {
+          "audioQuality": "320 kbps",
           "id": "quickshell.ytmusic",
           "idleShutdownMinutes": 15,
-          "showMiniPlayer": "On",
-          "shortcutPlayer": "Omarchy Music app",
-          "audioQuality": "320 kbps",
           "searchHistory": "[]",
-          "sessionState": "{\"tab\":\"home\",\"searchText\":\"\",\"libraryType\":\"tracks\",\"libraryFilter\":\"\",\"detailFilter\":\"\",\"detailItem\":null}"
+          "sessionState": "{\"tab\":\"home\",\"searchText\":\"\",\"libraryType\":\"tracks\",\"libraryFilter\":\"\",\"detailFilter\":\"\",\"detailItem\":null}",
+          "shortcutPlayer": "Omarchy Music app",
+          "showMiniPlayer": "On"
         },
         {
           "id": "omarchy.microphone"
@@ -100,7 +100,7 @@
           "id": "crmne.hyprmoncfg"
         },
         {
-          "id": "subi.monitor"
+          "id": "omarchy.monitor"
         },
         {
           "id": "jankeesvw.notification-center"
@@ -112,7 +112,7 @@
       ]
     },
     "position": "bottom",
-    "transparent": true
+    "transparent": false
   },
   "cloneSourceRestores": [
     "io.github.sirjul1337.lock-explorer",
