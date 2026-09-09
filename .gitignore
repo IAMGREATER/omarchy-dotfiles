@@ -23,3 +23,4 @@ scripts/local-bin/agy
 *.pyc
 __pycache__/
 *.lock
+*.bak*
