@@ -24,3 +24,14 @@ scripts/local-bin/agy
 __pycache__/
 *.lock
 *.bak*
+# Large AI CLI binaries — never commit these
+scripts/local-bin/agy*
+scripts/local-bin/claude
+scripts/local-bin/codex
+scripts/local-bin/gemini
+scripts/local-bin/crush
+scripts/local-bin/grok
+scripts/local-bin/copilot
+scripts/local-bin/gh
+scripts/local-bin/ghui
+*.old
