@@ -1,5 +1,5 @@
 [Unit]
-Description=XP-Pen Tablet Control Service
+Description=XP-Pen Deco 02 Roller Wheel Scroller
 PartOf=graphical-session.target
 After=graphical-session.target
 

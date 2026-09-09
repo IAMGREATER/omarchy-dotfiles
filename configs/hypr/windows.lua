@@ -29,9 +29,6 @@ o.window("^(com.mitchellh.ghostty|Alacritty|kitty|foot)$", {
   float = true,
 })
 
--- Screensaver: keep fullscreen
-o.window("org.omarchy.screensaver", { fullscreen = true, float = true })
-
 
 
 -- 1. Utility & Dialog Windows (Auto-Floating & Centered)
@@ -70,6 +67,13 @@ o.window("^(imv|loupe|eog|org.gnome.Loupe)$", {
   float = true,
   center = true,
   size = { 900, 650 },
+})
+
+-- Gesture & System Configuration GUIs
+o.window("^(eswl-config|WeazyStroke)$", {
+  float = true,
+  center = true,
+  size = { 850, 600 },
 })
 
 -- Polkit Authentication Prompts

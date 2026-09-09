@@ -4,11 +4,11 @@
 loop_input = true
 
 [binds]
-# Image navigation (Left = previous, Right = next; clamps at boundaries without exiting)
-<Left> = exec ~/.local/bin/imv-nav prev
-<bracketleft> = exec ~/.local/bin/imv-nav prev
-<Right> = exec ~/.local/bin/imv-nav next
-<bracketright> = exec ~/.local/bin/imv-nav next
+# Image navigation (Left = next/down, Right = previous/up; clamps at boundaries without exiting)
+<Left> = exec ~/.local/bin/imv-nav next
+<bracketleft> = exec ~/.local/bin/imv-nav next
+<Right> = exec ~/.local/bin/imv-nav prev
+<bracketright> = exec ~/.local/bin/imv-nav prev
 
 # Exit on Escape or q
 <Escape> = quit

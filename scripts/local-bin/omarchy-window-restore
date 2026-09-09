@@ -29,8 +29,7 @@ IGNORED_CLASSES = {
     "rofi", "fuzzel", "wofi", "hyprlock", "wlogout", "waybar", "swaync",
     "org.freedesktop.impl.portal.desktop.hyprland", "xdg-desktop-portal-hyprland",
     "org.quickshell", "quickshell", "hyprpaper", "mpvpaper", "omarchy-shell",
-    "swww-daemon", "ironbar", "eww", "eswl-overlay", "eswl-tray",
-    "org.omarchy.screensaver"
+    "swww-daemon", "ironbar", "eww", "eswl-overlay", "eswl-tray"
 }
 
 POPUP_CLASSES = {
@@ -43,8 +42,7 @@ POPUP_CLASSES = {
     "gnome-calculator", "org.gnome.Calculator", "omacalc",
     "xdg-desktop-portal-gtk", "xdg-desktop-portal-hyprland", "xdg-desktop-portal",
     "gcr-prompter", "pinentry", "pinentry-qt", "pinentry-gtk-2", "pinentry-gnome3",
-    "org.freedesktop.impl.portal.desktop.gtk", "eswl-config", "WeazyStroke", "org.weazystroke.Config",
-    "chrome-nngceckbapebfimnlniiiahkandclblb-Default"
+    "org.freedesktop.impl.portal.desktop.gtk", "eswl-config", "WeazyStroke", "org.weazystroke.Config"
 }
 
 MAIN_APP_CLASSES = {
@@ -219,10 +217,6 @@ def is_popup_or_dialog(win_dict):
     if cls in POPUP_CLASSES:
         return True
 
-    # Check for browser extension windows (e.g. Bitwarden, chrome-nngceckbapebfimnlniiiahkandclblb-Default, _crx_*)
-    if (cls.startswith("chrome-") and len(cls) > 30) or title.startswith("_crx_") or "extension" in cls.lower():
-        return True
-
     title_lower = title.lower()
     dialog_keywords = [
         "select a template", "template manager", "manage templates", "new document",
@@ -239,13 +233,9 @@ def is_popup_or_dialog(win_dict):
         return True
 
     cls_lower = cls.lower()
-    if any(k in cls_lower for k in ["bitwarden", "1password", "keepass", "authenticator"]):
-        return True
-
-    main_browsers = ["chromium", "google-chrome", "firefox", "zen"]
-    if cls in MAIN_APP_CLASSES or any(b == cls_lower for b in main_browsers) or any(k in cls_lower for k in [
+    if cls in MAIN_APP_CLASSES or any(k in cls_lower for k in [
         "xournal", "openboard", "libreoffice", "writer", "calc", "impress",
-        "ghostty", "alacritty", "kitty", "foot",
+        "chromium", "chrome", "firefox", "zen", "ghostty", "alacritty", "kitty", "foot",
         "evince", "okular", "gimp", "inkscape", "blender", "nautilus", "code"
     ]):
         return False
