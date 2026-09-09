@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 import os
+import re
 import sys
+import json
+import socket
 import subprocess
 import threading
 import glob
@@ -19,6 +22,7 @@ BACKUP_CATEGORIES = [
         "source": os.path.expanduser("~/.config/hypr"),
         "dest_sub": "configs/hypr",
         "restore_dest": os.path.expanduser("~/.config/hypr"),
+        "exclude": ["*.bak*"],
         "default": True,
     },
     {
@@ -33,6 +37,7 @@ BACKUP_CATEGORIES = [
             "plugins/*/node_modules",
             "blip/data",
             "*.lock",
+            "*.bak*",
         ],
         "default": True,
     },
@@ -105,6 +110,7 @@ BACKUP_CATEGORIES = [
             (os.path.expanduser("~/.bash_profile"), "scripts/bash_profile", os.path.expanduser("~/.bash_profile")),
             (os.path.expanduser("~/.config/starship.toml"), "configs/starship.toml", os.path.expanduser("~/.config/starship.toml")),
         ],
+        "scrub_secrets": True,
         "default": True,
     },
     {
@@ -116,6 +122,59 @@ BACKUP_CATEGORIES = [
     },
 ]
 
+# ─── Config persistence ────────────────────────────────────────────────────────
+CONFIG_PATH = os.path.expanduser("~/.config/omarchy/backup-hub.json")
+
+def load_config():
+    try:
+        with open(CONFIG_PATH) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def save_config(data):
+    os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+    with open(CONFIG_PATH, "w") as f:
+        json.dump(data, f, indent=2)
+
+# ─── Secret scrubbing ──────────────────────────────────────────────────────────
+SECRET_PATTERN = re.compile(
+    r'(.*(KEY|TOKEN|SECRET|PASSWORD|PASS|PWD|API|AUTH|CREDENTIAL|GH_|GITHUB_).*=).*',
+    re.IGNORECASE
+)
+
+def scrub_secrets(content: str) -> str:
+    """Replace any export/assignment of secrets with a placeholder value."""
+    lines = []
+    for line in content.splitlines(keepends=True):
+        m = SECRET_PATTERN.match(line)
+        if m:
+            lines.append(m.group(1) + '"YOUR_SECRET_HERE"\n')
+        else:
+            lines.append(line)
+    return "".join(lines)
+
+def scrub_and_copy(src_path: str, dst_path: str):
+    """Copy a text file, scrubbing any secret-looking lines."""
+    try:
+        with open(src_path, "r", errors="replace") as f:
+            content = f.read()
+        cleaned = scrub_secrets(content)
+        os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+        with open(dst_path, "w") as f:
+            f.write(cleaned)
+    except Exception:
+        subprocess.run(["cp", src_path, dst_path])
+
+# ─── Machine identity ──────────────────────────────────────────────────────────
+def get_machine_id() -> str:
+    """Return a stable, human-friendly machine identifier."""
+    cfg = load_config()
+    if cfg.get("machine_id"):
+        return cfg["machine_id"]
+    return socket.gethostname()
+
+
 class BackupApp(Adw.Application):
     def __init__(self):
         super().__init__(application_id="org.omarchy.BackupTool", flags=Gio.ApplicationFlags.FLAGS_NONE)
@@ -124,25 +183,29 @@ class BackupApp(Adw.Application):
         win = BackupWindow(application=self)
         win.present()
 
+
 class BackupWindow(Adw.ApplicationWindow):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.set_title("Omarchy Backup Hub")
-        self.set_default_size(740, 840)
+        self.set_default_size(740, 880)
 
         self.switches = {}
         self.restore_switches = {}
         self.repo_dir = os.path.expanduser("~/omarchy-dotfiles")
         self.vault_base = "/run/media/subi/VAULT/Omarchy Backup"
         self.custom_path = None
-        
+
+        # Load persisted config
+        self._cfg = load_config()
+
         main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.set_content(main_box)
 
         # Header Bar with View Switcher
         header = Adw.HeaderBar()
         self.view_stack = Adw.ViewStack()
-        
+
         switcher_title = Adw.ViewSwitcherTitle()
         switcher_title.set_stack(self.view_stack)
         switcher_title.set_title("Omarchy Backup Hub")
@@ -153,19 +216,127 @@ class BackupWindow(Adw.ApplicationWindow):
         self.view_stack.set_vexpand(True)
         main_box.append(self.view_stack)
 
-        # ------------------ TAB 1: BACKUP ------------------
+        # TAB 1: BACKUP
         backup_page = self.build_backup_page()
         self.view_stack.add_titled_with_icon(backup_page, "backup", "Backup", "document-save-symbolic")
 
-        # ------------------ TAB 2: RESTORE ------------------
+        # TAB 2: RESTORE
         restore_page = self.build_restore_page()
         self.view_stack.add_titled_with_icon(restore_page, "restore", "Restore", "edit-undo-symbolic")
+
+        # TAB 3: SETTINGS
+        settings_page = self.build_settings_page()
+        self.view_stack.add_titled_with_icon(settings_page, "settings", "Settings", "preferences-system-symbolic")
 
         # View Switcher Bar for narrow widths
         switcher_bar = Adw.ViewSwitcherBar()
         switcher_bar.set_stack(self.view_stack)
         main_box.append(switcher_bar)
 
+    # ─── SETTINGS PAGE ────────────────────────────────────────────────────────
+    def build_settings_page(self):
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_vexpand(True)
+
+        clamp = Adw.Clamp()
+        clamp.set_maximum_size(700)
+        scrolled.set_child(clamp)
+
+        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        content_box.set_margin_top(16)
+        content_box.set_margin_bottom(24)
+        content_box.set_margin_start(16)
+        content_box.set_margin_end(16)
+        clamp.set_child(content_box)
+
+        # Machine Identity
+        identity_group = Adw.PreferencesGroup(
+            title="Machine Identity",
+            description="A unique label included in every backup commit so you can tell laptop & PC backups apart when restoring"
+        )
+        content_box.append(identity_group)
+
+        self.machine_id_row = Adw.EntryRow(title="Machine Name / ID")
+        self.machine_id_row.set_text(self._cfg.get("machine_id", socket.gethostname()))
+        identity_group.add(self.machine_id_row)
+
+        machine_hint = Gtk.Label(label='Examples: "laptop", "gaming-pc", "work-desktop"')
+        machine_hint.set_xalign(0.0)
+        machine_hint.add_css_class("dim-label")
+        machine_hint.add_css_class("caption")
+        machine_hint.set_margin_start(4)
+        identity_group.add(machine_hint)
+
+        # GitHub Credentials
+        gh_group = Adw.PreferencesGroup(
+            title="GitHub Credentials",
+            description="Stored locally in ~/.config/omarchy/backup-hub.json — never committed to git"
+        )
+        content_box.append(gh_group)
+
+        self.gh_user_row = Adw.EntryRow(title="GitHub Username")
+        self.gh_user_row.set_text(self._cfg.get("gh_username", ""))
+        gh_group.add(self.gh_user_row)
+
+        self.gh_repo_row = Adw.EntryRow(title="GitHub Repository (user/repo)")
+        self.gh_repo_row.set_text(self._cfg.get("gh_repo", "IAMGREATER/omarchy-dotfiles"))
+        gh_group.add(self.gh_repo_row)
+
+        self.gh_pat_row = Adw.PasswordEntryRow(title="Personal Access Token (PAT)")
+        self.gh_pat_row.set_text(self._cfg.get("gh_pat", ""))
+        gh_group.add(self.gh_pat_row)
+
+        pat_hint = Gtk.Label(label="Create at: github.com -> Settings -> Developer settings -> Tokens (classic)\nRequired scopes: repo")
+        pat_hint.set_xalign(0.0)
+        pat_hint.add_css_class("dim-label")
+        pat_hint.add_css_class("caption")
+        pat_hint.set_margin_start(4)
+        gh_group.add(pat_hint)
+
+        # Save Button
+        save_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        save_bar.set_margin_top(8)
+        content_box.append(save_bar)
+
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        save_bar.append(spacer)
+
+        save_btn = Gtk.Button(label="Save Settings")
+        save_btn.add_css_class("suggested-action")
+        save_btn.connect("clicked", self.on_save_settings)
+        save_bar.append(save_btn)
+
+        self.settings_status = Gtk.Label(label="")
+        self.settings_status.set_xalign(0.0)
+        self.settings_status.set_wrap(True)
+        content_box.append(self.settings_status)
+
+        return scrolled
+
+    def on_save_settings(self, btn):
+        machine_id = self.machine_id_row.get_text().strip() or socket.gethostname()
+        gh_user = self.gh_user_row.get_text().strip()
+        gh_repo = self.gh_repo_row.get_text().strip()
+        gh_pat = self.gh_pat_row.get_text().strip()
+
+        self._cfg.update({
+            "machine_id": machine_id,
+            "gh_username": gh_user,
+            "gh_repo": gh_repo,
+            "gh_pat": gh_pat,
+        })
+        save_config(self._cfg)
+
+        # Update git remote URL to embed credentials if PAT provided
+        if gh_pat and gh_user and gh_repo:
+            remote_url = f"https://{gh_user}:{gh_pat}@github.com/{gh_repo}.git"
+            subprocess.run(["git", "-C", self.repo_dir, "remote", "set-url", "origin", remote_url], capture_output=True)
+
+        self.settings_status.set_text(f"Settings saved. Machine ID: \"{machine_id}\"")
+        self.github_row.set_subtitle(f"Sync changes to {gh_repo or 'IAMGREATER/omarchy-dotfiles'}")
+
+    # ─── BACKUP PAGE ──────────────────────────────────────────────────────────
     def build_backup_page(self):
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_vexpand(True)
@@ -181,12 +352,12 @@ class BackupWindow(Adw.ApplicationWindow):
         content_box.set_margin_end(16)
         clamp.set_child(content_box)
 
-        # Destinations Section
         dest_group = Adw.PreferencesGroup(title="Backup Destinations", description="Choose where your incremental snapshot will be saved")
         content_box.append(dest_group)
 
-        # GitHub Repo Row
-        self.github_row = Adw.ActionRow(title="GitHub Repository", subtitle="Sync changes to IAMGREATER/omarchy-dotfiles")
+        gh_repo = self._cfg.get("gh_repo", "IAMGREATER/omarchy-dotfiles")
+
+        self.github_row = Adw.ActionRow(title="GitHub Repository", subtitle=f"Sync changes to {gh_repo}")
         self.github_switch = Gtk.Switch()
         self.github_switch.set_active(True)
         self.github_switch.set_valign(Gtk.Align.CENTER)
@@ -194,9 +365,11 @@ class BackupWindow(Adw.ApplicationWindow):
         self.github_row.set_activatable_widget(self.github_switch)
         dest_group.add(self.github_row)
 
-        # VAULT External Drive Row
         vault_connected = os.path.isdir("/run/media/subi/VAULT")
-        self.local_row = Adw.ActionRow(title="VAULT External Drive", subtitle="/run/media/subi/VAULT/Omarchy Backup" if vault_connected else "Drive not currently connected")
+        self.local_row = Adw.ActionRow(
+            title="VAULT External Drive",
+            subtitle="/run/media/subi/VAULT/Omarchy Backup" if vault_connected else "Drive not currently connected"
+        )
         self.local_switch = Gtk.Switch()
         self.local_switch.set_active(vault_connected)
         self.local_switch.set_valign(Gtk.Align.CENTER)
@@ -204,7 +377,6 @@ class BackupWindow(Adw.ApplicationWindow):
         self.local_row.set_activatable_widget(self.local_switch)
         dest_group.add(self.local_row)
 
-        # Custom Folder Row
         self.custom_row = Adw.ActionRow(title="Custom Directory Backup", subtitle="Disabled")
         self.custom_switch = Gtk.Switch()
         self.custom_switch.set_active(False)
@@ -219,8 +391,10 @@ class BackupWindow(Adw.ApplicationWindow):
         self.custom_row.add_suffix(self.custom_choose_btn)
         dest_group.add(self.custom_row)
 
-        # Items Section
-        items_group = Adw.PreferencesGroup(title="Items to Backup (Incremental & Lean)", description="Only changes are synced; huge git trees and binaries are trimmed automatically")
+        items_group = Adw.PreferencesGroup(
+            title="Items to Backup (Incremental & Lean)",
+            description="Only changes are synced; huge git trees and binaries are trimmed automatically"
+        )
         content_box.append(items_group)
 
         for cat in BACKUP_CATEGORIES:
@@ -233,7 +407,6 @@ class BackupWindow(Adw.ApplicationWindow):
             items_group.add(row)
             self.switches[cat["id"]] = sw
 
-        # Progress / Log Box
         self.log_group = Adw.PreferencesGroup(title="Status & Activity")
         content_box.append(self.log_group)
 
@@ -243,10 +416,10 @@ class BackupWindow(Adw.ApplicationWindow):
 
         self.status_label = Gtk.Label(label="Ready to backup.")
         self.status_label.set_xalign(0.0)
+        self.status_label.set_wrap(True)
         self.status_label.set_margin_top(8)
         self.log_group.add(self.status_label)
 
-        # Bottom Actions Bar
         bottom_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         bottom_bar.set_margin_top(8)
         bottom_bar.set_margin_bottom(16)
@@ -271,6 +444,7 @@ class BackupWindow(Adw.ApplicationWindow):
 
         return scrolled
 
+    # ─── RESTORE PAGE ─────────────────────────────────────────────────────────
     def build_restore_page(self):
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_vexpand(True)
@@ -286,11 +460,12 @@ class BackupWindow(Adw.ApplicationWindow):
         content_box.set_margin_end(16)
         clamp.set_child(content_box)
 
-        # Source Selection Section
-        source_group = Adw.PreferencesGroup(title="Restore Source", description="Choose where to restore configurations and data from")
+        source_group = Adw.PreferencesGroup(
+            title="Restore Source",
+            description="Each machine's backups are labelled with its Machine ID. Mix and match to aggregate both laptop and PC backups."
+        )
         content_box.append(source_group)
 
-        # Source Combo Row
         self.source_row = Adw.ComboRow(title="Backup Source")
         self.source_model = Gtk.StringList()
         self.source_row.set_model(self.source_model)
@@ -301,7 +476,6 @@ class BackupWindow(Adw.ApplicationWindow):
         self.refresh_sources_btn.connect("clicked", lambda b: self.populate_restore_sources())
         source_group.add(self.refresh_sources_btn)
 
-        # Restore Items Section
         restore_items_group = Adw.PreferencesGroup(title="Items to Restore", description="Select what you want to restore to your system")
         content_box.append(restore_items_group)
 
@@ -315,7 +489,6 @@ class BackupWindow(Adw.ApplicationWindow):
             restore_items_group.add(row)
             self.restore_switches[cat["id"]] = sw
 
-        # Restore Status / Progress
         self.restore_log_group = Adw.PreferencesGroup(title="Restore Status")
         content_box.append(self.restore_log_group)
 
@@ -325,10 +498,10 @@ class BackupWindow(Adw.ApplicationWindow):
 
         self.restore_status_label = Gtk.Label(label="Select a source and items to restore.")
         self.restore_status_label.set_xalign(0.0)
+        self.restore_status_label.set_wrap(True)
         self.restore_status_label.set_margin_top(8)
         self.restore_log_group.add(self.restore_status_label)
 
-        # Restore Bottom Bar
         bottom_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         bottom_bar.set_margin_top(8)
         bottom_bar.set_margin_bottom(16)
@@ -354,22 +527,21 @@ class BackupWindow(Adw.ApplicationWindow):
         self.populate_restore_sources()
         return scrolled
 
+    # ─── Helpers ──────────────────────────────────────────────────────────────
     def set_all_switches(self, switch_dict, state):
         for sw in switch_dict.values():
             sw.set_active(state)
 
     def populate_restore_sources(self):
-        # Clear existing
         while self.source_model.get_n_items() > 0:
             self.source_model.remove(0)
 
         self.source_paths = []
 
-        # 1. GitHub dotfiles clone
-        self.source_model.append("GitHub Repository (IAMGREATER/omarchy-dotfiles)")
+        gh_repo = self._cfg.get("gh_repo", "IAMGREATER/omarchy-dotfiles")
+        self.source_model.append(f"GitHub Repository ({gh_repo})")
         self.source_paths.append(self.repo_dir)
 
-        # 2. VAULT backups
         if os.path.isdir(self.vault_base):
             entries = sorted(glob.glob(os.path.join(self.vault_base, "Backup *")), reverse=True)
             for entry in entries:
@@ -385,7 +557,14 @@ class BackupWindow(Adw.ApplicationWindow):
         idx = row.get_selected()
         if 0 <= idx < len(self.source_paths):
             src = self.source_paths[idx]
-            self.restore_status_label.set_text(f"Selected source: {src}")
+            # Show machine ID from backup if present
+            mid_file = os.path.join(src, ".machine-id")
+            if os.path.isfile(mid_file):
+                with open(mid_file) as f:
+                    mid = f.read().strip()
+                self.restore_status_label.set_text(f"Source: {src}\nMachine: {mid}")
+            else:
+                self.restore_status_label.set_text(f"Selected source: {src}")
 
     def on_custom_toggle(self, sw, param):
         active = sw.get_active()
@@ -411,19 +590,19 @@ class BackupWindow(Adw.ApplicationWindow):
         except Exception:
             pass
 
-    # ------------------ BACKUP EXECUTION ------------------
+    # ─── BACKUP EXECUTION ─────────────────────────────────────────────────────
     def on_start_backup(self, btn):
         dest_gh = self.github_switch.get_active()
         dest_vault = self.local_switch.get_active() and os.path.isdir("/run/media/subi/VAULT")
         dest_custom = self.custom_switch.get_active() and bool(self.custom_path)
 
         if not (dest_gh or dest_vault or dest_custom):
-            self.status_label.set_text("⚠️ Please select at least one valid destination.")
+            self.status_label.set_text("Please select at least one valid destination.")
             return
 
         selected_items = [cid for cid, sw in self.switches.items() if sw.get_active()]
         if not selected_items:
-            self.status_label.set_text("⚠️ Please select at least one item to backup.")
+            self.status_label.set_text("Please select at least one item to backup.")
             return
 
         self.backup_btn.set_sensitive(False)
@@ -453,6 +632,8 @@ class BackupWindow(Adw.ApplicationWindow):
 
     def run_backup(self, dest_gh, dest_vault, dest_custom, selected_items):
         try:
+            self._cfg = load_config()
+            machine_id = (self._cfg.get("machine_id", "") or socket.gethostname()).strip()
             date_str = datetime.now().strftime("%d-%m-%Y")
             repo = self.repo_dir
             os.makedirs(repo, exist_ok=True)
@@ -460,7 +641,6 @@ class BackupWindow(Adw.ApplicationWindow):
             total_steps = len(selected_items) + 3
             cur_step = 0
 
-            # Sync chosen items incrementally
             for cat in BACKUP_CATEGORIES:
                 cid = cat["id"]
                 if cid not in selected_items:
@@ -469,7 +649,6 @@ class BackupWindow(Adw.ApplicationWindow):
                 cur_step += 1
                 self.update_ui_status(f"Syncing {cat['title']}...", cur_step / total_steps)
 
-                # Build exclude flags
                 exclude_flags = []
                 for ex in cat.get("exclude", []):
                     exclude_flags.extend(["--exclude", ex])
@@ -491,11 +670,15 @@ class BackupWindow(Adw.ApplicationWindow):
                             subprocess.run(cmd)
 
                 elif "files" in cat:
+                    scrub = cat.get("scrub_secrets", False)
                     for fpath, sub, _ in cat["files"]:
                         if os.path.exists(fpath):
                             dst_file = os.path.join(repo, sub)
                             os.makedirs(os.path.dirname(dst_file), exist_ok=True)
-                            subprocess.run(["cp", fpath, dst_file])
+                            if scrub:
+                                scrub_and_copy(fpath, dst_file)
+                            else:
+                                subprocess.run(["cp", fpath, dst_file])
 
                 elif cat.get("generator"):
                     pkg_dir = os.path.join(repo, "packages")
@@ -518,12 +701,16 @@ class BackupWindow(Adw.ApplicationWindow):
                     if os.path.isfile(mise_cfg):
                         subprocess.run(["cp", mise_cfg, os.path.join(pkg_dir, "mise-tools.toml")])
 
-            # Cleanup any bulky temp/cache files from scripts/local-bin in repo
+            # Cleanup bulky temp files from repo
             bin_target = os.path.join(repo, "scripts/local-bin")
             if os.path.isdir(bin_target):
                 subprocess.run(["find", bin_target, "-name", "*.bak*", "-delete"])
                 subprocess.run(["find", bin_target, "-name", "__pycache__", "-exec", "rm", "-rf", "{}", "+"])
                 subprocess.run(["rm", "-f", os.path.join(bin_target, "agy")])
+
+            # Write machine-id marker file into repo
+            with open(os.path.join(repo, ".machine-id"), "w") as f:
+                f.write(f"{machine_id}\n")
 
             # Push to GitHub
             gh_msg = ""
@@ -533,55 +720,62 @@ class BackupWindow(Adw.ApplicationWindow):
                 subprocess.run(["git", "-C", repo, "add", "-A"])
                 diff = subprocess.run(["git", "-C", repo, "diff", "--cached", "--quiet"])
                 if diff.returncode != 0:
-                    subprocess.run(["git", "-C", repo, "commit", "-m", f"Backup update {date_str}"])
-                    push_res = subprocess.run(["git", "-C", repo, "push", "origin", "main"], capture_output=True, text=True)
+                    commit_msg = f"Backup update {date_str} [{machine_id}]"
+                    subprocess.run(["git", "-C", repo, "commit", "-m", commit_msg])
+                    push_res = subprocess.run(
+                        ["git", "-C", repo, "push", "origin", "main"],
+                        capture_output=True, text=True
+                    )
                     if push_res.returncode == 0:
-                        gh_msg = " • Pushed latest changes to GitHub"
+                        gh_msg = f" • Pushed to GitHub [{machine_id}]"
                     else:
-                        gh_msg = f" • GitHub warning: {push_res.stderr.strip()[:60]}"
+                        err = push_res.stderr.strip()
+                        if "GH013" in err or "secret" in err.lower():
+                            gh_msg = " • GitHub blocked push (secret detected)\n   Fix: check Settings tab for credentials, then re-run backup."
+                        else:
+                            gh_msg = f" • GitHub push failed: {err[:120]}"
                 else:
                     gh_msg = " • GitHub already up to date (no changes)"
 
-            # Sync to VAULT under main Omarchy Backup folder
+            # Sync to VAULT
             vault_msg = ""
             if dest_vault:
                 cur_step += 1
                 self.update_ui_status("Syncing to VAULT external drive...", cur_step / total_steps)
                 os.makedirs(self.vault_base, exist_ok=True)
-                vault_target = os.path.join(self.vault_base, f"Backup {date_str}")
+                vault_target = os.path.join(self.vault_base, f"Backup {date_str} [{machine_id}]")
                 os.makedirs(vault_target, exist_ok=True)
-                # Incremental rsync to keep backup fast and lean
                 subprocess.run(["rsync", "-a", "--delete", f"{repo}/", f"{vault_target}/"])
-                vault_msg = f" • Synced to VAULT ({vault_target})"
+                vault_msg = f" • Synced to VAULT ({os.path.basename(vault_target)})"
 
             # Sync to Custom folder
             custom_msg = ""
             if dest_custom and self.custom_path:
                 cur_step += 1
                 self.update_ui_status(f"Syncing to {self.custom_path}...", cur_step / total_steps)
-                custom_target = os.path.join(self.custom_path, f"Backup {date_str}")
+                custom_target = os.path.join(self.custom_path, f"Backup {date_str} [{machine_id}]")
                 os.makedirs(custom_target, exist_ok=True)
                 subprocess.run(["rsync", "-a", "--delete", f"{repo}/", f"{custom_target}/"])
                 custom_msg = f" • Synced to {custom_target}"
 
-            final_msg = f"✅ Backup complete!\n{gh_msg}\n{vault_msg}\n{custom_msg}".strip()
+            final_msg = f"Backup complete! [{machine_id}]\n{gh_msg}\n{vault_msg}\n{custom_msg}".strip()
             self.finish_backup(True, final_msg)
 
         except Exception as e:
-            self.finish_backup(False, f"❌ Backup error: {str(e)}")
+            self.finish_backup(False, f"Backup error: {str(e)}")
 
-    # ------------------ RESTORE EXECUTION ------------------
+    # ─── RESTORE EXECUTION ────────────────────────────────────────────────────
     def on_start_restore(self, btn):
         idx = self.source_row.get_selected()
         if idx < 0 or idx >= len(self.source_paths):
-            self.restore_status_label.set_text("⚠️ Invalid restore source selected.")
+            self.restore_status_label.set_text("Invalid restore source selected.")
             return
 
         source_dir = self.source_paths[idx]
         selected_items = [cid for cid, sw in self.restore_switches.items() if sw.get_active()]
 
         if not selected_items:
-            self.restore_status_label.set_text("⚠️ Please select at least one item to restore.")
+            self.restore_status_label.set_text("Please select at least one item to restore.")
             return
 
         self.restore_btn.set_sensitive(False)
@@ -610,7 +804,13 @@ class BackupWindow(Adw.ApplicationWindow):
 
     def run_restore(self, source_dir, selected_items):
         try:
-            # If source is git repo, ensure it's pulled first
+            # Read source machine ID if present
+            source_machine = ""
+            mid_file = os.path.join(source_dir, ".machine-id")
+            if os.path.isfile(mid_file):
+                with open(mid_file) as f:
+                    source_machine = f.read().strip()
+
             if source_dir == self.repo_dir:
                 self.update_restore_status("Pulling latest commits from GitHub...", 0.05)
                 subprocess.run(["git", "-C", self.repo_dir, "pull", "origin", "main"])
@@ -648,7 +848,6 @@ class BackupWindow(Adw.ApplicationWindow):
                             subprocess.run(["cp", src_file, r_dst])
 
                 elif cat.get("generator"):
-                    # Re-enable plugins
                     enabled_txt = os.path.join(source_dir, "packages/omarchy-third-party-enabled.txt")
                     if os.path.isfile(enabled_txt):
                         with open(enabled_txt) as f:
@@ -658,17 +857,20 @@ class BackupWindow(Adw.ApplicationWindow):
                                     subprocess.run(["omarchy", "plugin", "add", plugin_id, "--enable"], capture_output=True)
                                     subprocess.run(["omarchy", "plugin", "enable", plugin_id], capture_output=True)
 
-            # Reload daemons and keybindings
             cur_step += 1
             self.update_restore_status("Reloading system services & window manager...", cur_step / total_steps)
             subprocess.run(["systemctl", "--user", "daemon-reload"])
             subprocess.run(["systemctl", "--user", "restart", "weazystroke.service"], capture_output=True)
             subprocess.run(["hyprctl", "reload"], capture_output=True)
 
-            self.finish_restore(True, f"✅ Selected items restored successfully from:\n{source_dir}")
+            src_label = source_dir
+            if source_machine:
+                src_label += f"\nMachine: {source_machine}"
+            self.finish_restore(True, f"Selected items restored successfully from:\n{src_label}")
 
         except Exception as e:
-            self.finish_restore(False, f"❌ Restore error: {str(e)}")
+            self.finish_restore(False, f"Restore error: {str(e)}")
+
 
 if __name__ == "__main__":
     app = BackupApp()
