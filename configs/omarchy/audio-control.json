@@ -1,5 +1,5 @@
 {
   "version": 1,
   "outputOverdrive": true,
-  "captureNotifications": false
+  "captureNotifications": true
 }

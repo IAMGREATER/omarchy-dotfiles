@@ -3,7 +3,6 @@ export LC_TIME="en_GB.UTF-8"
 
 # Omarchy environment (OMARCHY_PATH + PATH), needed even for non-interactive shells
 [[ -r /usr/share/omarchy/default/bash/env-bootstrap ]] && source /usr/share/omarchy/default/bash/env-bootstrap
-export OMARCHY_SCREENSHOT_DIR="$HOME/Pictures/Screenshots"
 
 # If not running interactively, don't do anything else (leave this above the rc source)
 [[ $- != *i* ]] && return
@@ -20,5 +19,3 @@ source "$OMARCHY_PATH/default/bash/rc"
 # Added by Antigravity CLI installer
 export PATH="$HOME/.local/bin:$PATH"
 alias agy="agy --dangerously-skip-permissions"
-export GEMINI_API_KEY="YOUR_SECRET_HERE"
-

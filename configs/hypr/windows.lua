@@ -3,23 +3,13 @@
 -- Default: All windows open in the floating layer for Windows 11 unified z-order stacking
 o.window(".*", { tile = false, float = true })
 
--- Browser tags and floating overrides
-o.window("((google-)?[cC]hrom(e|ium)|[bB]rave-browser|[mM]icrosoft-edge|Vivaldi-stable|helium)", {
-  tag = "+chromium-based-browser",
+-- Override any default tiling rules so all applications share the unified floating layer
+o.window({ tag = "chromium-based-browser" }, { tile = false, float = true })
+o.window({ tag = "firefox-based-browser" }, { tile = false, float = true })
+o.window("((google-)?[cC]hrom(e|ium)|[bB]rave-browser|[mM]icrosoft-edge|Vivaldi-stable|helium|firefox|zen|librewolf)", {
   tile = false,
   float = true,
 })
-o.window("([fF]irefox|zen|librewolf)", {
-  tag = "+firefox-based-browser",
-  tile = false,
-  float = true,
-})
-o.window({ tag = "chromium-based-browser" }, { tag = "-default-opacity", tile = false, float = true, opacity = "1.0 0.985" })
-o.window({ tag = "firefox-based-browser" }, { tag = "-default-opacity", opacity = "1.0 0.985" })
-
--- Video apps: remove chromium browser tag so they don't get opacity applied.
-o.window("(^.+-youtube\\.com__.*$|^.+-app\\.zoom\\.us__wc_home.*$)", { tag = "-chromium-based-browser" })
-o.window("(^.+-youtube\\.com__.*$|^.+-app\\.zoom\\.us__wc_home.*$)", { tag = "-default-opacity" })
 o.window("^(libreoffice.*|soffice.bin|org.gnome.Evince|evince|okular|org.kde.okular|Gimp.*|inkscape|blender)$", {
   tile = false,
   float = true,
@@ -97,11 +87,36 @@ o.window("^(xournalpp|com.github.xournalpp.xournalpp|ch.openboard.OpenBoard|open
   float = true,
 })
 
--- 5. Password Manager & Authenticator Dialogs
-o.window({ title = "(?i)(Bitwarden|1Password|KeePass|LastPass|Authenticator|Proton Pass)" }, {
+-- 5. Browser Extension Popups (Bitwarden, 1Password, etc.) & Vault Unlock Dialogs
+-- Chromium extension popups have class `chrome-<ext_id>-<profile>` and initialTitle `_crx_<ext_id>`.
+-- Matching on class, initial_class, and initial_title ensures static rules (size, center) apply immediately upon window creation.
+o.window("^(Bitwarden|bitwarden|chrome-nngceckbapebfimnlniiiahkandclblb.*)$", {
   float = true,
   center = true,
-  size = { 440, 620 },
+  size = { 460, 640 },
+  no_screen_share = true,
+  focus_on_activate = true,
+})
+
+o.window({ initial_title = "^_crx_.*" }, {
+  float = true,
+  center = true,
+  size = { 460, 640 },
+  focus_on_activate = true,
+})
+
+o.window({ initial_class = "^(Bitwarden|bitwarden|chrome-nngceckbapebfimnlniiiahkandclblb.*)$" }, {
+  float = true,
+  center = true,
+  size = { 460, 640 },
+  no_screen_share = true,
+  focus_on_activate = true,
+})
+
+o.window({ title = "(?i)(Bitwarden|1Password|KeePass|LastPass|Authenticator|Proton Pass|Extension:)" }, {
+  float = true,
+  center = true,
+  size = { 460, 640 },
 })
 
 -- 6. File Choosers, Save As, and Print Dialogs

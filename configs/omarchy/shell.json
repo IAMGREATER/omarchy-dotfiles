@@ -66,10 +66,10 @@
       ],
       "right": [
         {
-          "id": "omarchy.tray"
+          "id": "subi.agents"
         },
         {
-          "id": "subi.agents"
+          "id": "omarchy.tray"
         },
         {
           "id": "rosakodu.dock"
@@ -112,7 +112,7 @@
       ]
     },
     "position": "bottom",
-    "transparent": true
+    "transparent": false
   },
   "cloneSourceRestores": [
     "io.github.sirjul1337.lock-explorer",
