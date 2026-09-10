@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Ensure mise environment is loaded if applicable
+export PATH="$HOME/.local/share/mise/shims:$PATH"
+exec ghostty -e copilot "$@"

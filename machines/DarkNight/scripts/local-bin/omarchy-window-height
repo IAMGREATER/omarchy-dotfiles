@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+"""
+Omarchy Window Height: Adjust individual window height while maintaining tiled split.
+"""
+
+import sys
+import os
+import glob
+import json
+import socket
+import subprocess
+
+DELTA = 60
+GEOM_FILE = os.path.expanduser("~/.local/state/omarchy/window_geometry.json")
+
+
+def find_live_socket2():
+    uid = os.getuid()
+    runtime_dir = os.getenv("XDG_RUNTIME_DIR", f"/run/user/{uid}")
+    os.environ["XDG_RUNTIME_DIR"] = runtime_dir
+
+    cur_sig = os.getenv("HYPRLAND_INSTANCE_SIGNATURE")
+    if cur_sig:
+        for base in [f"{runtime_dir}/hypr/{cur_sig}", f"/tmp/hypr/{cur_sig}"]:
+            sock_p = f"{base}/.socket2.sock"
+            if os.path.exists(sock_p):
+                try:
+                    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                    s.settimeout(0.2)
+                    s.connect(sock_p)
+                    s.close()
+                    return cur_sig
+                except Exception:
+                    pass
+
+    candidates = glob.glob(f"{runtime_dir}/hypr/*/.socket2.sock") + glob.glob(f"/tmp/hypr/*/.socket2.sock")
+    if candidates:
+        candidates.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+        for cand in candidates:
+            try:
+                s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                s.settimeout(0.2)
+                s.connect(cand)
+                s.close()
+                sig = os.path.basename(os.path.dirname(cand))
+                os.environ["HYPRLAND_INSTANCE_SIGNATURE"] = sig
+                return sig
+            except Exception:
+                continue
+
+    return None
+
+
+def ensure_hypr_env():
+    return find_live_socket2()
+
+
+def get_active_and_mon():
+    ensure_hypr_env()
+    try:
+        active = json.loads(subprocess.check_output(["hyprctl", "activewindow", "-j"], timeout=2))
+        monitors = json.loads(subprocess.check_output(["hyprctl", "monitors", "-j"], timeout=2))
+        mon = next((m for m in monitors if m["id"] == active.get("monitor")), monitors[0])
+        return active, mon
+    except Exception:
+        return None, None
+
+
+def save_window_geometry(cls, state_entry):
+    if not cls:
+        return
+    try:
+        os.makedirs(os.path.dirname(GEOM_FILE), exist_ok=True)
+        geom = {}
+        if os.path.exists(GEOM_FILE):
+            try:
+                with open(GEOM_FILE, "r") as f:
+                    geom = json.load(f)
+            except Exception:
+                geom = {}
+        geom[cls] = state_entry
+        with open(GEOM_FILE, "w") as f:
+            json.dump(geom, f, indent=2)
+    except Exception:
+        pass
+
+
+def adjust_height(direction):
+    active, mon = get_active_and_mon()
+    if not active or not active.get("address"):
+        return
+
+    addr = active["address"]
+    cls = active.get("initialClass") or active.get("class", "")
+    window = f"address:{addr}"
+
+    res = mon.get("reserved", [0, 0, 0, 0])
+    avail_h = mon["height"] - res[1] - res[3] - 4
+    avail_w = mon["width"] - res[0] - res[2] - 4
+
+    cur_h = active["size"][1]
+    cur_w = active["size"][0]
+    cur_x = active["at"][0]
+    cur_y = active["at"][1]
+
+    new_h = cur_h
+
+    if direction in ("shrink", "down", "-"):
+        if not active.get("floating") and cur_h >= avail_h - 10:
+            subprocess.run(["hyprctl", "dispatch", "hl.dsp.window.pseudo()"])
+
+        new_h = max(250, cur_h - DELTA)
+        subprocess.run(["hyprctl", "eval", f'hl.dispatch(hl.dsp.window.resize({{ window = "{window}", x = {cur_w}, y = {new_h} }}))'])
+
+    elif direction in ("expand", "up", "+"):
+        new_h = min(avail_h, cur_h + DELTA)
+        if new_h >= avail_h - 10:
+            new_h = avail_h
+        subprocess.run(["hyprctl", "eval", f'hl.dispatch(hl.dsp.window.resize({{ window = "{window}", x = {cur_w}, y = {new_h} }}))'])
+
+    elif direction in ("reset", "full", "vert", "vertical", "max"):
+        new_h = avail_h
+        subprocess.run(["hyprctl", "eval", f'hl.dispatch(hl.dsp.window.resize({{ window = "{window}", x = {cur_w}, y = {avail_h} }})); hl.dispatch(hl.dsp.window.move({{ window = "{window}", x = {cur_x}, y = {avail_y} }}))'])
+
+    elif direction in ("toggle", "pseudo"):
+        subprocess.run(["hyprctl", "dispatch", "hl.dsp.window.pseudo()"])
+        return
+
+    if cls and new_h != cur_h:
+        avail_x = mon["x"] + res[0] + 2
+        avail_y = mon["y"] + res[1] + 2
+        save_window_geometry(cls, {
+            "mode": "geometry",
+            "snap": "custom",
+            "ratio_w": cur_w / max(1, avail_w),
+            "ratio_h": new_h / max(1, avail_h),
+            "ratio_x": max(0.0, min(1.0, (cur_x - avail_x) / max(1, avail_w))),
+            "ratio_y": max(0.0, min(1.0, (cur_y - avail_y) / max(1, avail_h))),
+            "align_right": abs((cur_x + cur_w) - (avail_x + avail_w)) <= 25,
+            "align_bottom": abs((cur_y + new_h) - (avail_y + avail_h)) <= 25
+        })
+
+
+if __name__ == "__main__":
+    action = sys.argv[1] if len(sys.argv) > 1 else "shrink"
+    adjust_height(action)

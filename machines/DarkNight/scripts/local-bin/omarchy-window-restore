@@ -1,0 +1,698 @@
+#!/usr/bin/env python3
+"""
+Omarchy Window Geometry Persistence, Dynamic Screen Adaptation & Click-Raise Daemon:
+1. All main application windows open in MAXIMIZED view by default (unless previously tiled or resized).
+2. Dialogue boxes, popups, and utility windows open floating and centered without being maximized.
+3. If a window was tiled 50% (left/right/top/bottom) or quarter-tiled, it restores to that exact 50% / quarter
+   layout on whatever monitor it is opened on, adjusting width and height to match the new screen dimensions.
+4. If a window was custom resized, it scales proportionally to the new monitor resolution while staying fully in bounds.
+5. Remembers states dynamically across restarts and monitor changes.
+6. Pure floating management (fullscreen = 0) in Hyprland's unified Floating Layer for Windows 11 Z-stack raising.
+"""
+
+import sys
+import os
+import glob
+import json
+import time
+import socket
+import select
+import struct
+import threading
+import subprocess
+
+STATE_FILE = os.path.expanduser("~/.local/state/omarchy/window_geometry.json")
+SNAP_STATE_FILE = os.path.expanduser("~/.local/state/omarchy/snap_state.json")
+GAP = 2
+
+IGNORED_CLASSES = {
+    "rofi", "fuzzel", "wofi", "hyprlock", "wlogout", "waybar", "swaync",
+    "org.freedesktop.impl.portal.desktop.hyprland", "xdg-desktop-portal-hyprland",
+    "org.quickshell", "quickshell", "hyprpaper", "mpvpaper", "omarchy-shell",
+    "swww-daemon", "ironbar", "eww", "eswl-overlay", "eswl-tray"
+}
+
+POPUP_CLASSES = {
+    "1password", "1Password", "Bitwarden", "bitwarden", "KeePass", "keepass",
+    "org.keepassxc.KeePassXC", "authenticator", "Authenticator",
+    "pavucontrol", "org.pulseaudio.pavucontrol", "blueman-manager",
+    ".blueman-manager-wrapped", "nm-connection-editor",
+    "polkit-gnome-authentication-agent-1", "polkit-kde-authentication-agent-1",
+    "org.kde.polkit-kde-authentication-agent-1", "org.kde.kcalc",
+    "gnome-calculator", "org.gnome.Calculator", "omacalc",
+    "xdg-desktop-portal-gtk", "xdg-desktop-portal-hyprland", "xdg-desktop-portal",
+    "gcr-prompter", "pinentry", "pinentry-qt", "pinentry-gtk-2", "pinentry-gnome3",
+    "org.freedesktop.impl.portal.desktop.gtk", "eswl-config", "WeazyStroke", "org.weazystroke.Config"
+}
+
+MAIN_APP_CLASSES = {
+    "chromium", "google-chrome", "brave-browser", "microsoft-edge", "vivaldi-stable",
+    "firefox", "zen", "librewolf", "ghostty", "com.mitchellh.ghostty", "alacritty",
+    "kitty", "foot", "nautilus", "org.gnome.Nautilus", "libreoffice", "libreoffice-writer",
+    "libreoffice-calc", "libreoffice-impress", "libreoffice-draw", "soffice", "soffice.bin",
+    "xournalpp", "com.github.xournalpp.xournalpp", "openboard", "ch.openboard.OpenBoard",
+    "gimp", "inkscape", "blender", "evince", "org.gnome.Evince", "okular", "org.kde.okular",
+    "dev.tensaku.Tensaku", "mpv", "code", "vlc", "org.videolan.vlc", "zoom", "us.zoom.Zoom",
+    "skype", "com.skype.Client", "spotify", "discord", "slack", "obsidian", "thunderbird"
+}
+
+
+def find_live_socket2():
+    """Finds the active Hyprland socket2 by verifying actual connectivity."""
+    uid = os.getuid()
+    runtime_dir = os.getenv("XDG_RUNTIME_DIR", f"/run/user/{uid}")
+    os.environ["XDG_RUNTIME_DIR"] = runtime_dir
+
+    cur_sig = os.getenv("HYPRLAND_INSTANCE_SIGNATURE")
+    if cur_sig:
+        for base in [f"{runtime_dir}/hypr/{cur_sig}", f"/tmp/hypr/{cur_sig}"]:
+            sock_p = f"{base}/.socket2.sock"
+            if os.path.exists(sock_p):
+                try:
+                    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                    s.settimeout(0.2)
+                    s.connect(sock_p)
+                    return s, sock_p, cur_sig
+                except Exception:
+                    pass
+
+    candidates = glob.glob(f"{runtime_dir}/hypr/*/.socket2.sock") + glob.glob(f"/tmp/hypr/*/.socket2.sock")
+    if candidates:
+        candidates.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+        for cand in candidates:
+            try:
+                s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                s.settimeout(0.2)
+                s.connect(cand)
+                sig = os.path.basename(os.path.dirname(cand))
+                os.environ["HYPRLAND_INSTANCE_SIGNATURE"] = sig
+                return s, cand, sig
+            except Exception:
+                continue
+
+    return None, None, None
+
+
+def ensure_hypr_env():
+    """Ensures HYPRLAND_INSTANCE_SIGNATURE is set to an active instance."""
+    s, _, sig = find_live_socket2()
+    if s:
+        s.close()
+        return sig
+    return None
+
+
+def load_saved_state():
+    try:
+        if os.path.exists(STATE_FILE):
+            with open(STATE_FILE, "r") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def save_saved_state(state):
+    try:
+        os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+        with open(STATE_FILE, "w") as f:
+            json.dump(state, f, indent=2)
+    except Exception:
+        pass
+
+
+def load_snap_state():
+    try:
+        if os.path.exists(SNAP_STATE_FILE):
+            with open(SNAP_STATE_FILE, "r") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def save_snap_state(state):
+    try:
+        os.makedirs(os.path.dirname(SNAP_STATE_FILE), exist_ok=True)
+        with open(SNAP_STATE_FILE, "w") as f:
+            json.dump(state, f, indent=2)
+    except Exception:
+        pass
+
+
+def get_hypr_clients_and_monitors():
+    ensure_hypr_env()
+    clients = []
+    monitors = []
+    try:
+        raw_c = subprocess.check_output(["hyprctl", "clients", "-j"], timeout=1)
+        clients = json.loads(raw_c.decode("utf-8"))
+    except Exception:
+        pass
+    try:
+        raw_m = subprocess.check_output(["hyprctl", "monitors", "-j"], timeout=1)
+        monitors = json.loads(raw_m.decode("utf-8"))
+    except Exception:
+        pass
+    return clients, monitors
+
+
+def hypr_eval(code):
+    ensure_hypr_env()
+    try:
+        subprocess.run(["hyprctl", "eval", code], capture_output=True, timeout=1.5)
+    except Exception:
+        pass
+
+
+def get_pointer_monitor(monitors):
+    try:
+        cursor_raw = subprocess.check_output(["hyprctl", "cursorpos"], timeout=0.3).decode().strip()
+        cx, cy = [int(v.strip()) for v in cursor_raw.split(",")]
+        for m in monitors:
+            if not m.get("disabled", False):
+                mx, my, mw, mh = m["x"], m["y"], m["width"], m["height"]
+                if mx <= cx < mx + mw and my <= cy < my + mh:
+                    return m
+    except Exception:
+        pass
+    for m in monitors:
+        if m.get("focused", False) and not m.get("disabled", False):
+            return m
+    return monitors[0] if monitors else None
+
+
+def get_monitor_for_window(win, monitors):
+    """Finds which monitor contains the center of the window."""
+    if not win or not monitors:
+        return monitors[0] if monitors else None
+    
+    at = win.get("at", [0, 0])
+    size = win.get("size", [800, 600])
+    cx = at[0] + size[0] / 2
+    cy = at[1] + size[1] / 2
+
+    for m in monitors:
+        if not m.get("disabled", False):
+            mx, my, mw, mh = m["x"], m["y"], m["width"], m["height"]
+            if mx <= cx < mx + mw and my <= cy < my + mh:
+                return m
+
+    # Fallback to win['monitor'] ID
+    mon_id = win.get("monitor", 0)
+    for m in monitors:
+        if m.get("id") == mon_id:
+            return m
+
+    return monitors[0] if monitors else None
+
+
+def is_popup_or_dialog(win_dict):
+    """Accurately identifies popups, dialogs, auth windows, and utility boxes."""
+    if not win_dict:
+        return False
+    cls = (win_dict.get("initialClass") or win_dict.get("class") or "").strip()
+    title = (win_dict.get("initialTitle") or win_dict.get("title") or "").strip()
+
+    if cls in POPUP_CLASSES:
+        return True
+
+    title_lower = title.lower()
+    dialog_keywords = [
+        "select a template", "template manager", "manage templates", "new document",
+        "open file", "save file", "save as", "save changes", "save document", "open folder",
+        "select a folder", "choose files", "choose a file", "file upload", "print", "print preview",
+        "extension:", "bitwarden", "1password", "keepass", "lastpass", "authenticator",
+        "picture-in-picture", "picture in picture", "pip", "properties", "preferences", "options",
+        "styles", "character", "paragraph", "page style", "find and replace", "find & replace",
+        "insert", "special characters", "hyperlink", "customize", "confirm", "confirmation",
+        "warning", "alert", "error", "question", "discard", "overwrite", "rename", "replace",
+        "export", "import", "about"
+    ]
+    if any(k in title_lower for k in dialog_keywords):
+        return True
+
+    cls_lower = cls.lower()
+    if cls in MAIN_APP_CLASSES or any(k in cls_lower for k in [
+        "xournal", "openboard", "libreoffice", "writer", "calc", "impress",
+        "chromium", "chrome", "firefox", "zen", "ghostty", "alacritty", "kitty", "foot",
+        "evince", "okular", "gimp", "inkscape", "blender", "nautilus", "code"
+    ]):
+        return False
+
+    return False
+
+
+def determine_window_state(win, mon):
+    """
+    Determines whether the window is maximized, half-tiled (left/right/top/bottom),
+    quarter-tiled, or custom resized relative to the monitor's usable area.
+    """
+    res = mon.get("reserved", [0, 0, 0, 0]) if mon else [0, 0, 0, 0]
+    avail_x = (mon["x"] if mon else 0) + res[0] + GAP
+    avail_y = (mon["y"] if mon else 0) + res[1] + GAP
+    avail_w = (mon["width"] if mon else 1920) - res[0] - res[2] - (GAP * 2)
+    avail_h = (mon["height"] if mon else 1080) - res[1] - res[3] - (GAP * 2)
+
+    half_w = int((avail_w - GAP) / 2)
+    half_h = int((avail_h - GAP) / 2)
+    right_x = avail_x + half_w + GAP
+    bottom_y = avail_y + half_h + GAP
+
+    at = win.get("at", [0, 0])
+    size = win.get("size", [800, 600])
+    is_fullscreen = win.get("fullscreen", 0) != 0
+
+    # 1. Maximized
+    if is_fullscreen or (abs(size[0] - avail_w) <= 40 and abs(size[1] - avail_h) <= 40):
+        return {"mode": "maximized"}
+
+    # 2. 50% Left Half
+    if abs(at[0] - avail_x) <= 30 and abs(size[0] - half_w) <= 40 and abs(size[1] - avail_h) <= 40:
+        return {"mode": "geometry", "snap": "left", "ratio_w": 0.5, "ratio_h": 1.0}
+
+    # 3. 50% Right Half
+    if abs(at[0] - right_x) <= 30 and abs(size[0] - half_w) <= 40 and abs(size[1] - avail_h) <= 40:
+        return {"mode": "geometry", "snap": "right", "ratio_w": 0.5, "ratio_h": 1.0}
+
+    # 4. 50% Top Half
+    if abs(at[1] - avail_y) <= 30 and abs(size[0] - avail_w) <= 40 and abs(size[1] - half_h) <= 40:
+        return {"mode": "geometry", "snap": "top-half", "ratio_w": 1.0, "ratio_h": 0.5}
+
+    # 5. 50% Bottom Half
+    if abs(at[1] - bottom_y) <= 30 and abs(size[0] - avail_w) <= 40 and abs(size[1] - half_h) <= 40:
+        return {"mode": "geometry", "snap": "bottom-half", "ratio_w": 1.0, "ratio_h": 0.5}
+
+    # 6. Corner Quarters
+    if abs(at[0] - avail_x) <= 30 and abs(at[1] - avail_y) <= 30 and abs(size[0] - half_w) <= 40 and abs(size[1] - half_h) <= 40:
+        return {"mode": "geometry", "snap": "top-left", "ratio_w": 0.5, "ratio_h": 0.5}
+
+    if abs(at[0] - right_x) <= 30 and abs(at[1] - avail_y) <= 30 and abs(size[0] - half_w) <= 40 and abs(size[1] - half_h) <= 40:
+        return {"mode": "geometry", "snap": "top-right", "ratio_w": 0.5, "ratio_h": 0.5}
+
+    if abs(at[0] - avail_x) <= 30 and abs(at[1] - bottom_y) <= 30 and abs(size[0] - half_w) <= 40 and abs(size[1] - half_h) <= 40:
+        return {"mode": "geometry", "snap": "bottom-left", "ratio_w": 0.5, "ratio_h": 0.5}
+
+    if abs(at[0] - right_x) <= 30 and abs(at[1] - bottom_y) <= 30 and abs(size[0] - half_w) <= 40 and abs(size[1] - half_h) <= 40:
+        return {"mode": "geometry", "snap": "bottom-right", "ratio_w": 0.5, "ratio_h": 0.5}
+
+    # 7. Custom Resized Geometry
+    ratio_w = size[0] / max(1, avail_w)
+    ratio_h = size[1] / max(1, avail_h)
+    ratio_x = max(0.0, min(1.0, (at[0] - avail_x) / max(1, avail_w)))
+    ratio_y = max(0.0, min(1.0, (at[1] - avail_y) / max(1, avail_h)))
+    align_right = abs((at[0] + size[0]) - (avail_x + avail_w)) <= 25
+    align_bottom = abs((at[1] + size[1]) - (avail_y + avail_h)) <= 25
+
+    return {
+        "mode": "geometry",
+        "snap": "custom",
+        "ratio_w": ratio_w,
+        "ratio_h": ratio_h,
+        "ratio_x": ratio_x,
+        "ratio_y": ratio_y,
+        "align_right": align_right,
+        "align_bottom": align_bottom,
+        "w": size[0],
+        "h": size[1]
+    }
+
+
+def get_device_name(fd):
+    try:
+        import fcntl
+        buf = bytearray(256)
+        fcntl.ioctl(fd, 0x80ff4506, buf, True)
+        return buf.split(b"\x00")[0].decode("utf-8", "replace")
+    except Exception:
+        return ""
+
+
+class WindowManagerDaemon:
+    def __init__(self):
+        self.saved_state = load_saved_state()
+        self.live_windows = {}
+        self.input_fds = []
+        self.lock = threading.Lock()
+
+    def setup_input_devices(self):
+        for fd in self.input_fds:
+            try:
+                os.close(fd)
+            except Exception:
+                pass
+        self.input_fds = []
+
+        for p in sorted(glob.glob("/dev/input/event*"), key=lambda x: int(x.replace("/dev/input/event", ""))):
+            try:
+                fd = os.open(p, os.O_RDONLY | os.O_NONBLOCK)
+                name = get_device_name(fd)
+                lower = name.lower()
+                is_mouse_or_touchpad = any(k in lower for k in ["mouse", "touchpad", "trackpoint"])
+                is_non_pointer = any(k in lower for k in ["virtual", "pen", "stylus", "tablet", "wacom", "finger", "touch", "keyboard", "switch", "button"])
+                if is_mouse_or_touchpad and not is_non_pointer:
+                    self.input_fds.append(fd)
+                else:
+                    os.close(fd)
+            except Exception:
+                pass
+
+    def sync_live_windows(self):
+        clients, monitors = get_hypr_clients_and_monitors()
+        current_addrs = set()
+
+        with self.lock:
+            for c in clients:
+                addr = c.get("address")
+                if not addr:
+                    continue
+
+                norm_addr = addr if addr.startswith("0x") else ("0x" + addr)
+                current_addrs.add(norm_addr)
+                cls = c.get("initialClass") or c.get("class", "")
+                title = c.get("initialTitle") or c.get("title", "")
+
+                # Keep in floating layer for Windows 11 unified z-stacking
+                if not c.get("floating", False) and not is_popup_or_dialog(c) and cls not in IGNORED_CLASSES:
+                    spec = f"address:{norm_addr}"
+                    hypr_eval(f'hl.dispatch(hl.dsp.focus({{ window = "{spec}" }})); hl.dispatch(hl.dsp.window.float({{ window = "{spec}", action = "float" }}))')
+
+                self.live_windows[norm_addr] = {
+                    "address": norm_addr,
+                    "class": cls,
+                    "initialClass": c.get("initialClass", ""),
+                    "title": title,
+                    "at": c.get("at", [0, 0]),
+                    "size": c.get("size", [800, 600]),
+                    "floating": True,
+                    "fullscreen": c.get("fullscreen", 0),
+                    "monitor": c.get("monitor", 0),
+                    "workspace": c.get("workspace", {}).get("id", 1),
+                }
+
+            # Check for closed windows
+            closed = [a for a in list(self.live_windows.keys()) if a not in current_addrs]
+            for a in closed:
+                self.handle_window_closed(a)
+
+    def handle_window_closed(self, addr):
+        norm_addr = addr if addr.startswith("0x") else ("0x" + addr)
+        win_info = self.live_windows.pop(norm_addr, None)
+        if not win_info:
+            for k in list(self.live_windows.keys()):
+                if k.lower().endswith(addr.lower().lstrip("0x")):
+                    win_info = self.live_windows.pop(k)
+                    break
+
+        if not win_info:
+            return
+
+        cls = win_info.get("class") or win_info.get("initialClass")
+        if not cls or cls in IGNORED_CLASSES or is_popup_or_dialog(win_info):
+            return
+
+        size = win_info.get("size", [800, 600])
+        # Reject tiny popup/dialog sizes (< 500x350) from overwriting main app layout
+        if size[0] < 500 or size[1] < 350:
+            return
+
+        _, monitors = get_hypr_clients_and_monitors()
+        mon = get_monitor_for_window(win_info, monitors)
+        if not mon:
+            return
+
+        state = determine_window_state(win_info, mon)
+        self.saved_state = load_saved_state()
+        self.saved_state[cls] = state
+        save_saved_state(self.saved_state)
+
+    def staged_window_restore(self, norm_addr, cls):
+        spec = f"address:{norm_addr}"
+
+        # 3-phase staged restore to defeat toolkit geometry overrides (GTK, Qt, Chromium)
+        for delay in (0.04, 0.14, 0.28):
+            time.sleep(delay)
+            clients, monitors = get_hypr_clients_and_monitors()
+            cur_client = next((c for c in clients if c.get("address", "").lower() == norm_addr.lower()), None)
+            if not cur_client:
+                continue
+
+            if not cls:
+                cls = cur_client.get("initialClass") or cur_client.get("class", "")
+
+            if not cls or cls in IGNORED_CLASSES:
+                return
+
+            if is_popup_or_dialog(cur_client):
+                # Dialogs / Popups stay floating, centered, and untouched
+                hypr_eval(f'hl.dispatch(hl.dsp.window.bring_to_top({{ window = "{spec}" }})); hl.dispatch(hl.dsp.window.alter_zorder({{ window = "{spec}", mode = "top" }}))')
+                return
+
+            # Check if this is a child modal of the same app on this workspace
+            cur_ws_id = cur_client.get("workspace", {}).get("id")
+            same_class_existing = [
+                c for c in clients
+                if (c.get("initialClass") or c.get("class", "")).lower() == cls.lower()
+                and (c.get("address", "").lower() != norm_addr.lower())
+                and c.get("workspace", {}).get("id") == cur_ws_id
+                and c.get("mapped") and not c.get("hidden")
+            ]
+            if same_class_existing and cur_client.get("size", [800, 600])[0] < 600:
+                # Small child prompt
+                return
+
+            # Determine target monitor
+            target_mon = get_pointer_monitor(monitors)
+            if not target_mon:
+                target_mon = get_monitor_for_window(cur_client, monitors)
+
+            if not target_mon:
+                return
+
+            res = target_mon.get("reserved", [0, 0, 0, 0])
+            avail_x = target_mon["x"] + res[0] + GAP
+            avail_y = target_mon["y"] + res[1] + GAP
+            avail_w = target_mon["width"] - res[0] - res[2] - (GAP * 2)
+            avail_h = target_mon["height"] - res[1] - res[3] - (GAP * 2)
+            half_w = int((avail_w - GAP) / 2)
+            half_h = int((avail_h - GAP) / 2)
+            right_x = avail_x + half_w + GAP
+            bottom_y = avail_y + half_h + GAP
+
+            self.saved_state = load_saved_state()
+            state_entry = self.saved_state.get(cls)
+            if not state_entry:
+                for k, v in self.saved_state.items():
+                    if k.lower() == cls.lower():
+                        state_entry = v
+                        break
+
+            # Default: Main app windows open MAXIMIZED unless previously tiled or resized
+            mode = state_entry.get("mode", "maximized") if state_entry else "maximized"
+            snap_type = state_entry.get("snap", "maximize") if state_entry else "maximize"
+
+            target_ws = target_mon.get("activeWorkspace", {}).get("id", 1)
+            cur_ws = cur_client.get("workspace", {}).get("id", 1)
+            if cur_ws != target_ws:
+                hypr_eval(f'hl.dispatch(hl.dsp.window.movetoworkspace({{ window = "{spec}", workspace = {target_ws} }}))')
+
+            if not cur_client.get("floating", True):
+                hypr_eval(f'hl.dispatch(hl.dsp.window.float({{ window = "{spec}" }}))')
+
+            if mode == "maximized" or snap_type in ("maximize", "max"):
+                cx, cy, cw, ch = avail_x, avail_y, avail_w, avail_h
+                snap_to_record = "maximize"
+            elif snap_type == "left":
+                cx, cy, cw, ch = avail_x, avail_y, half_w, avail_h
+                snap_to_record = "left"
+            elif snap_type == "right":
+                cx, cy, cw, ch = right_x, avail_y, half_w, avail_h
+                snap_to_record = "right"
+            elif snap_type in ("top-half", "top", "up"):
+                cx, cy, cw, ch = avail_x, avail_y, avail_w, half_h
+                snap_to_record = "top-half"
+            elif snap_type in ("bottom-half", "bottom", "down"):
+                cx, cy, cw, ch = avail_x, bottom_y, avail_w, half_h
+                snap_to_record = "bottom-half"
+            elif snap_type == "top-left":
+                cx, cy, cw, ch = avail_x, avail_y, half_w, half_h
+                snap_to_record = "top-left"
+            elif snap_type == "top-right":
+                cx, cy, cw, ch = right_x, avail_y, half_w, half_h
+                snap_to_record = "top-right"
+            elif snap_type == "bottom-left":
+                cx, cy, cw, ch = avail_x, bottom_y, half_w, half_h
+                snap_to_record = "bottom-left"
+            elif snap_type == "bottom-right":
+                cx, cy, cw, ch = right_x, bottom_y, half_w, half_h
+                snap_to_record = "bottom-right"
+            else:
+                # Custom resized: scale proportionally to target screen
+                ratio_w = state_entry.get("ratio_w", 0.75) if state_entry else 0.75
+                ratio_h = state_entry.get("ratio_h", 0.75) if state_entry else 0.75
+                cw = max(500, min(avail_w, int(avail_w * ratio_w)))
+                ch = max(350, min(avail_h, int(avail_h * ratio_h)))
+                if state_entry and state_entry.get("align_right"):
+                    cx = avail_x + avail_w - cw
+                else:
+                    ratio_x = state_entry.get("ratio_x", 0.05) if state_entry else 0.05
+                    cx = avail_x + int(avail_w * ratio_x)
+
+                if state_entry and state_entry.get("align_bottom"):
+                    cy = avail_y + avail_h - ch
+                else:
+                    ratio_y = state_entry.get("ratio_y", 0.05) if state_entry else 0.05
+                    cy = avail_y + int(avail_h * ratio_y)
+
+                cx = max(avail_x, min(cx, avail_x + avail_w - cw))
+                cy = max(avail_y, min(cy, avail_y + avail_h - ch))
+                snap_to_record = "custom"
+
+            hypr_eval(f'hl.dispatch(hl.dsp.focus({{ window = "{spec}" }})); hl.dispatch(hl.dsp.window.fullscreen_state({{ window = "{spec}", internal = 0, client = 0 }})); hl.dispatch(hl.dsp.window.resize({{ window = "{spec}", x = {cw}, y = {ch} }})); hl.dispatch(hl.dsp.window.move({{ window = "{spec}", x = {cx}, y = {cy} }})); hl.dispatch(hl.dsp.window.bring_to_top({{ window = "{spec}" }})); hl.dispatch(hl.dsp.window.alter_zorder({{ window = "{spec}", mode = "top" }}))')
+
+            snaps = load_snap_state()
+            snaps[norm_addr] = {
+                "orig_geom": {"x": cx, "y": cy, "w": cw, "h": ch, "floating": True, "fullscreen": 0},
+                "snap": snap_to_record
+            }
+            save_snap_state(snaps)
+
+        # Keep child dialogs/prompts on top of the newly restored main window
+        try:
+            time.sleep(0.04)
+            clients_now, _ = get_hypr_clients_and_monitors()
+            for c in clients_now:
+                c_addr = c.get("address")
+                if not c_addr or c_addr.lower() == norm_addr.lower():
+                    continue
+                if is_popup_or_dialog(c) and c.get("mapped") and not c.get("hidden"):
+                    c_spec = f"address:{c_addr if c_addr.startswith('0x') else ('0x' + c_addr)}"
+                    hypr_eval(f'hl.dispatch(hl.dsp.window.bring_to_top({{ window = "{c_spec}" }})); hl.dispatch(hl.dsp.window.alter_zorder({{ window = "{c_spec}", mode = "top" }})); hl.dispatch(hl.dsp.focus({{ window = "{c_spec}" }}))')
+        except Exception:
+            pass
+
+        self.sync_live_windows()
+
+    def handle_window_opened(self, addr, cls, title):
+        norm_addr = addr if addr.startswith("0x") else ("0x" + addr)
+        t = threading.Thread(target=self.staged_window_restore, args=(norm_addr, cls), daemon=True)
+        t.start()
+
+    def on_mouse_click(self):
+        try:
+            cursor_raw = subprocess.check_output(["hyprctl", "cursorpos"], timeout=0.2).decode().strip()
+            cx, cy = [int(v.strip()) for v in cursor_raw.split(",")]
+            clients, monitors = get_hypr_clients_and_monitors()
+
+            target = None
+            pinned_or_dialogs = []
+            for m in monitors:
+                if not m.get("disabled", False):
+                    mx, my, mw, mh = m["x"], m["y"], m["width"], m["height"]
+                    if mx <= cx < mx + mw and my <= cy < my + mh:
+                        ws_id = m.get("activeWorkspace", {}).get("id")
+                        for c in reversed(clients):
+                            if c.get("workspace", {}).get("id") == ws_id and c.get("mapped") and not c.get("hidden"):
+                                wx, wy = c.get("at", [0, 0])
+                                ww, wh = c.get("size", [0, 0])
+                                if wx <= cx <= wx + ww and wy <= cy <= wy + wh:
+                                    if not target:
+                                        target = c.get("address")
+                                if c.get("pinned") or is_popup_or_dialog(c):
+                                    pinned_or_dialogs.append(c.get("address"))
+                        break
+
+            if target:
+                hypr_eval(f"hl.dispatch(hl.dsp.focus({{ window = 'address:{target}' }})); hl.dispatch(hl.dsp.window.bring_to_top({{ window = 'address:{target}' }})); hl.dispatch(hl.dsp.window.alter_zorder({{ window = 'address:{target}', mode = 'top' }}))")
+                for p_addr in pinned_or_dialogs:
+                    if p_addr and p_addr.lower() != target.lower():
+                        hypr_eval(f"hl.dispatch(hl.dsp.window.bring_to_top({{ window = 'address:{p_addr}' }})); hl.dispatch(hl.dsp.window.alter_zorder({{ window = 'address:{p_addr}', mode = 'top' }}))")
+            else:
+                hypr_eval("hl.dispatch(hl.dsp.window.bring_to_top()); hl.dispatch(hl.dsp.window.alter_zorder({ mode = 'top' }))")
+        except Exception:
+            hypr_eval("hl.dispatch(hl.dsp.window.bring_to_top()); hl.dispatch(hl.dsp.window.alter_zorder({ mode = 'top' }))")
+
+    def run(self):
+        print("Starting Omarchy Window Geometry Persistence & Click-Raise Daemon...", flush=True)
+        self.sync_live_windows()
+        self.setup_input_devices()
+
+        sock, sock_path, _ = find_live_socket2()
+        if sock:
+            sock.setblocking(False)
+            print(f"Connected to Hyprland socket2: {sock_path}", flush=True)
+        else:
+            print("Waiting for active Hyprland socket2...", flush=True)
+
+        buf = ""
+        last_device_rescan = time.time()
+
+        while True:
+            try:
+                now = time.time()
+                if now - last_device_rescan > 10.0:
+                    last_device_rescan = now
+                    self.setup_input_devices()
+
+                rlist = self.input_fds.copy()
+                if sock:
+                    rlist.append(sock)
+
+                readable, _, _ = select.select(rlist, [], [], 0.5)
+
+                for r in readable:
+                    if r == sock:
+                        data = sock.recv(4096)
+                        if not data:
+                            print("Socket2 closed, reconnecting...", flush=True)
+                            sock.close()
+                            sock = None
+                            break
+                        buf += data.decode("utf-8", "replace")
+                        while "\n" in buf:
+                            line, buf = buf.split("\n", 1)
+                            line = line.strip()
+                            if not line:
+                                continue
+
+                            if ">>" in line:
+                                event, args = line.split(">>", 1)
+                                if event == "openwindow":
+                                    parts = args.split(",")
+                                    if len(parts) >= 4:
+                                        w_addr = parts[0]
+                                        w_cls = parts[2]
+                                        w_title = parts[3]
+                                        self.handle_window_opened(w_addr, w_cls, w_title)
+                                elif event == "closewindow":
+                                    w_addr = args.strip()
+                                    self.handle_window_closed(w_addr)
+                                elif event in ("movewindow", "movewindowv2", "resizewindow", "activewindow", "activewindowv2", "changefloatingmode", "fullscreen", "focusedmon"):
+                                    self.sync_live_windows()
+                    else:
+                        try:
+                            raw = os.read(r, 24)
+                            if len(raw) == 24:
+                                sec, usec, ev_type, ev_code, ev_val = struct.unpack("qqHHi", raw)
+                                if ev_type == 1 and ev_code == 272 and ev_val == 1:
+                                    self.on_mouse_click()
+                        except Exception:
+                            pass
+
+                if not sock:
+                    time.sleep(1.0)
+                    sock, sock_path, _ = find_live_socket2()
+                    if sock:
+                        sock.setblocking(False)
+                        print(f"Reconnected to socket2: {sock_path}", flush=True)
+                        self.sync_live_windows()
+
+            except KeyboardInterrupt:
+                break
+            except Exception:
+                time.sleep(0.5)
+
+
+if __name__ == "__main__":
+    daemon = WindowManagerDaemon()
+    daemon.run()

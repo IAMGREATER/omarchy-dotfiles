@@ -1,0 +1,422 @@
+#!/usr/bin/env python3
+"""
+XP-Pen Deco 02 Configuration GUI (GTK4 / Libadwaita)
+Provides a visual interface for:
+- Roller Wheel configuration (scroll, zoom, brush size, invert)
+- Express buttons 1-6 mapping with key combo recorder
+- Monitor cycling configuration
+- Single-instance toggle (press Button 1 to open, press again to close)
+"""
+
+import os
+import sys
+import json
+import subprocess
+import gi
+
+gi.require_version('Gtk', '4.0')
+gi.require_version('Adw', '1')
+from gi.repository import Gtk, Adw, Gio, GLib, Gdk
+
+CONFIG_PATH = os.path.expanduser("~/.config/xppen/config.json")
+
+DEFAULT_CONFIG = {
+    "monitors": {
+        "auto_detect": True,
+        "include_span_all": True,
+        "comment": "Dynamically discovers all connected monitors from Hyprland."
+    },
+    "wheel": {
+        "enabled": True,
+        "invert": False,
+        "action": "scroll"
+    },
+    "buttons": {
+        "button1": {
+            "name": "Button 1 (Topmost)",
+            "hardware_code": 48,
+            "action": "open_config",
+            "keys": [],
+            "comment": "Toggle settings GUI or open config."
+        },
+        "button2": {
+            "name": "Button 2 (Middle Top)",
+            "hardware_code": 57,
+            "action": "cycle_monitor",
+            "keys": [],
+            "comment": "Cycles drawing display across attached monitors."
+        },
+        "button3": {
+            "name": "Button 3 (Above Wheel)",
+            "hardware_code": 18,
+            "action": "key_combo",
+            "keys": ["ctrl", "s"],
+            "comment": "Save document / file."
+        },
+        "button4": {
+            "name": "Button 4 (Below Wheel)",
+            "hardware_code": 23,
+            "action": "key_combo",
+            "keys": ["ctrl", "shift", "p"],
+            "comment": "Select Pen Tool (Xournal++)."
+        },
+        "button5": {
+            "name": "Button 5 (Middle Bottom)",
+            "hardware_code": 44,
+            "action": "key_combo",
+            "keys": ["ctrl", "shift", "h"],
+            "comment": "Select Highlighter Tool (Xournal++)."
+        },
+        "button6": {
+            "name": "Button 6 (Bottommost)",
+            "hardware_code": 31,
+            "action": "key_combo",
+            "keys": ["ctrl", "shift", "e"],
+            "comment": "Select Eraser Tool (Xournal++)."
+        }
+    }
+}
+
+
+def load_config():
+    if os.path.exists(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return DEFAULT_CONFIG
+
+
+def save_config(cfg):
+    os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+    with open(CONFIG_PATH, "w") as f:
+        json.dump(cfg, f, indent=2)
+
+
+def get_hypr_monitors():
+    try:
+        res = subprocess.run(["hyprctl", "-j", "monitors"], capture_output=True, text=True, timeout=1)
+        data = json.loads(res.stdout)
+        mons = []
+        for m in data:
+            if not m.get("disabled", False):
+                name = m["name"]
+                desc = m.get("model") or m.get("description") or name
+                if name.startswith("eDP"):
+                    desc = "Laptop Screen"
+                mons.append(f"{desc} ({name})")
+        return mons
+    except Exception:
+        return ["Laptop Screen (eDP-1)"]
+
+
+class KeyRecorderDialog(Gtk.Window):
+    def __init__(self, parent, button_name, current_keys, on_save_callback):
+        super().__init__(transient_for=parent, modal=True, title=f"Record Shortcut for {button_name}")
+        self.set_default_size(400, 200)
+        self.on_save_callback = on_save_callback
+        self.recorded_keys = list(current_keys)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16, margin_top=24, margin_bottom=24, margin_start=24, margin_end=24)
+
+        title_lbl = Gtk.Label(label=f"<b>Record Shortcut</b>", use_markup=True)
+        box.append(title_lbl)
+
+        desc_lbl = Gtk.Label(label="Press the desired key combination on your keyboard,\nthen click Apply.", justify=Gtk.Justification.CENTER)
+        box.append(desc_lbl)
+
+        self.key_lbl = Gtk.Label(label=self.format_keys(self.recorded_keys), css_classes=["title-2", "accent"])
+        box.append(self.key_lbl)
+
+        btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12, halign=Gtk.Align.CENTER)
+        clear_btn = Gtk.Button(label="Clear")
+        clear_btn.connect("clicked", self.on_clear)
+        btn_box.append(clear_btn)
+
+        cancel_btn = Gtk.Button(label="Cancel")
+        cancel_btn.connect("clicked", lambda b: self.close())
+        btn_box.append(cancel_btn)
+
+        apply_btn = Gtk.Button(label="Apply", css_classes=["suggested-action"])
+        apply_btn.connect("clicked", self.on_apply)
+        btn_box.append(apply_btn)
+
+        box.append(btn_box)
+        self.set_child(box)
+
+        key_ctrl = Gtk.EventControllerKey()
+        key_ctrl.connect("key-pressed", self.on_key_press)
+        self.add_controller(key_ctrl)
+
+    def format_keys(self, keys):
+        if not keys:
+            return "(No keys set)"
+        return " + ".join([k.upper() for k in keys])
+
+    def on_key_press(self, controller, keyval, keycode, state):
+        mods = []
+        if state & Gdk.ModifierType.CONTROL_MASK:
+            mods.append("ctrl")
+        if state & Gdk.ModifierType.SHIFT_MASK:
+            mods.append("shift")
+        if state & Gdk.ModifierType.ALT_MASK:
+            mods.append("alt")
+        if state & Gdk.ModifierType.SUPER_MASK:
+            mods.append("super")
+
+        keyname = Gdk.keyval_name(keyval)
+        if not keyname:
+            return True
+
+        k_lower = keyname.lower()
+        if k_lower in ("control_l", "control_r", "shift_l", "shift_r", "alt_l", "alt_r", "super_l", "super_r"):
+            self.recorded_keys = mods
+        else:
+            # Clean common key names
+            if k_lower == "return":
+                k_lower = "enter"
+            elif k_lower == "escape":
+                k_lower = "esc"
+            
+            keys = list(mods)
+            if k_lower not in keys:
+                keys.append(k_lower)
+            self.recorded_keys = keys
+
+        self.key_lbl.set_label(self.format_keys(self.recorded_keys))
+        return True
+
+    def on_clear(self, btn):
+        self.recorded_keys = []
+        self.key_lbl.set_label(self.format_keys(self.recorded_keys))
+
+    def on_apply(self, btn):
+        self.on_save_callback(self.recorded_keys)
+        self.close()
+
+
+class MainWindow(Adw.ApplicationWindow):
+    def __init__(self, app):
+        super().__init__(application=app, title="XP-Pen Deco 02 Settings")
+        self.set_default_size(720, 680)
+
+        self.config = load_config()
+
+        # Main Layout
+        toolbar_view = Adw.ToolbarView()
+        header = Adw.HeaderBar()
+        toolbar_view.add_top_bar(header)
+
+        # Reset button
+        reset_btn = Gtk.Button(label="Reset Defaults")
+        reset_btn.connect("clicked", self.on_reset_defaults)
+        header.pack_start(reset_btn)
+
+        # Content page
+        page = Adw.PreferencesPage()
+        toolbar_view.set_content(page)
+        self.set_content(toolbar_view)
+
+        # Section 1: Roller Wheel
+        wheel_grp = Adw.PreferencesGroup(title="Roller Wheel", description="Configure center rotary dial behavior")
+        page.add(wheel_grp)
+
+        self.wheel_enable_switch = Adw.SwitchRow(title="Enable Roller Wheel")
+        self.wheel_enable_switch.set_active(self.config.get("wheel", {}).get("enabled", True))
+        self.wheel_enable_switch.connect("notify::active", self.on_config_changed)
+        wheel_grp.add(self.wheel_enable_switch)
+
+        self.wheel_invert_switch = Adw.SwitchRow(title="Invert Scroll Direction")
+        self.wheel_invert_switch.set_active(self.config.get("wheel", {}).get("invert", False))
+        self.wheel_invert_switch.connect("notify::active", self.on_config_changed)
+        wheel_grp.add(self.wheel_invert_switch)
+
+        self.wheel_action_row = Adw.ComboRow(title="Wheel Action")
+        wheel_model = Gtk.StringList.new([
+            "Vertical Mouse Scrolling (Default)",
+            "Zoom In / Out (Ctrl + / -)",
+            "Brush Size Adjustment ([ and ])"
+        ])
+        self.wheel_action_row.set_model(wheel_model)
+        action_val = self.config.get("wheel", {}).get("action", "scroll")
+        if action_val == "zoom":
+            self.wheel_action_row.set_selected(1)
+        elif action_val == "brush_size":
+            self.wheel_action_row.set_selected(2)
+        else:
+            self.wheel_action_row.set_selected(0)
+        self.wheel_action_row.connect("notify::selected", self.on_config_changed)
+        wheel_grp.add(self.wheel_action_row)
+
+        # Section 2: Top Express Buttons (Buttons 1 - 3)
+        top_btns_grp = Adw.PreferencesGroup(title="Top Buttons (Above Dial)", description="Customize buttons 1, 2, and 3")
+        page.add(top_btns_grp)
+
+        self.btn_rows = {}
+        self.create_button_row(top_btns_grp, "button1", "Button 1 (Topmost)")
+        self.create_button_row(top_btns_grp, "button2", "Button 2 (Middle Top)")
+        self.create_button_row(top_btns_grp, "button3", "Button 3 (Above Dial)")
+
+        # Section 3: Bottom Express Buttons (Buttons 4 - 6)
+        bot_btns_grp = Adw.PreferencesGroup(title="Bottom Buttons (Below Dial)", description="Customize buttons 4, 5, and 6")
+        page.add(bot_btns_grp)
+
+        self.create_button_row(bot_btns_grp, "button4", "Button 4 (Below Dial)")
+        self.create_button_row(bot_btns_grp, "button5", "Button 5 (Middle Bottom)")
+        self.create_button_row(bot_btns_grp, "button6", "Button 6 (Bottommost)")
+
+        # Section 4: Display Configuration
+        disp_grp = Adw.PreferencesGroup(title="Display & Monitor Cycling", description="Dynamic screen mapping settings for Button 2")
+        page.add(disp_grp)
+
+        self.span_switch = Adw.SwitchRow(title="Include 'All Monitors (Span)' in Cycle")
+        self.span_switch.set_active(self.config.get("monitors", {}).get("include_span_all", True))
+        self.span_switch.connect("notify::active", self.on_config_changed)
+        disp_grp.add(self.span_switch)
+
+        # Detected monitors info row
+        detected_mons = get_hypr_monitors()
+        info_row = Adw.ActionRow(title="Active Connected Displays", subtitle=", ".join(detected_mons))
+        disp_grp.add(info_row)
+
+    def create_button_row(self, group, btn_key, title):
+        btn_data = self.config.get("buttons", {}).get(btn_key, {})
+        action = btn_data.get("action", "key_combo")
+        keys = btn_data.get("keys", [])
+
+        action_row = Adw.ActionRow(title=title)
+        
+        # Action selector combo
+        combo = Gtk.DropDown.new_from_strings([
+            "Key Shortcut Combo",
+            "Cycle Monitors / Displays",
+            "Toggle Settings GUI"
+        ])
+        if action == "cycle_monitor":
+            combo.set_selected(1)
+        elif action == "open_config":
+            combo.set_selected(2)
+        else:
+            combo.set_selected(0)
+
+        combo.set_valign(Gtk.Align.CENTER)
+        action_row.add_suffix(combo)
+
+        # Key badge / Record button
+        keys_btn = Gtk.Button(label=self.format_keys_label(keys), css_classes=["flat"])
+        keys_btn.set_valign(Gtk.Align.CENTER)
+        keys_btn.connect("clicked", lambda b: self.open_key_recorder(btn_key, title))
+        action_row.add_suffix(keys_btn)
+
+        # Update visibility based on action
+        keys_btn.set_visible(action == "key_combo")
+
+        def on_action_selected(dropdown, param):
+            idx = dropdown.get_selected()
+            if idx == 0:
+                self.config["buttons"][btn_key]["action"] = "key_combo"
+                keys_btn.set_visible(True)
+            elif idx == 1:
+                self.config["buttons"][btn_key]["action"] = "cycle_monitor"
+                keys_btn.set_visible(False)
+            elif idx == 2:
+                self.config["buttons"][btn_key]["action"] = "open_config"
+                keys_btn.set_visible(False)
+            self.on_config_changed()
+
+        combo.connect("notify::selected", on_action_selected)
+        group.add(action_row)
+
+        self.btn_rows[btn_key] = {
+            "row": action_row,
+            "combo": combo,
+            "keys_btn": keys_btn
+        }
+
+    def format_keys_label(self, keys):
+        if not keys:
+            return "Set Key Combo..."
+        return " + ".join([k.upper() for k in keys])
+
+    def open_key_recorder(self, btn_key, btn_name):
+        current_keys = self.config.get("buttons", {}).get(btn_key, {}).get("keys", [])
+        def on_saved(new_keys):
+            self.config["buttons"][btn_key]["keys"] = new_keys
+            self.btn_rows[btn_key]["keys_btn"].set_label(self.format_keys_label(new_keys))
+            self.on_config_changed()
+
+        dialog = KeyRecorderDialog(self, btn_name, current_keys, on_saved)
+        dialog.present()
+
+    def on_config_changed(self, *args):
+        # Update Wheel
+        self.config["wheel"]["enabled"] = self.wheel_enable_switch.get_active()
+        self.config["wheel"]["invert"] = self.wheel_invert_switch.get_active()
+        wheel_idx = self.wheel_action_row.get_selected()
+        if wheel_idx == 1:
+            self.config["wheel"]["action"] = "zoom"
+        elif wheel_idx == 2:
+            self.config["wheel"]["action"] = "brush_size"
+        else:
+            self.config["wheel"]["action"] = "scroll"
+
+        # Update Monitors
+        if "monitors" not in self.config:
+            self.config["monitors"] = {}
+        self.config["monitors"]["include_span_all"] = self.span_switch.get_active()
+
+        # Save to file
+        save_config(self.config)
+
+    def on_reset_defaults(self, btn):
+        self.config = json.loads(json.dumps(DEFAULT_CONFIG))
+        save_config(self.config)
+
+        # Refresh UI
+        self.wheel_enable_switch.set_active(True)
+        self.wheel_invert_switch.set_active(False)
+        self.wheel_action_row.set_selected(0)
+        self.span_switch.set_active(True)
+
+        for btn_key, widgets in self.btn_rows.items():
+            btn_data = self.config["buttons"].get(btn_key, {})
+            act = btn_data.get("action", "key_combo")
+            if act == "cycle_monitor":
+                widgets["combo"].set_selected(1)
+            elif act == "open_config":
+                widgets["combo"].set_selected(2)
+            else:
+                widgets["combo"].set_selected(0)
+            widgets["keys_btn"].set_label(self.format_keys_label(btn_data.get("keys", [])))
+            widgets["keys_btn"].set_visible(act == "key_combo")
+
+
+class XPPenApp(Adw.Application):
+    def __init__(self):
+        super().__init__(application_id="org.omarchy.xppen-config", flags=Gio.ApplicationFlags.FLAGS_NONE)
+        self.win = None
+
+    def do_activate(self):
+        if self.win is not None:
+            # Already open -> Toggle close
+            self.win.close()
+            self.win = None
+            return
+
+        self.win = MainWindow(self)
+        self.win.connect("close-request", self.on_window_closed)
+        self.win.present()
+
+    def on_window_closed(self, win):
+        self.win = None
+        return False
+
+
+def main():
+    app = XPPenApp()
+    return app.run(sys.argv)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

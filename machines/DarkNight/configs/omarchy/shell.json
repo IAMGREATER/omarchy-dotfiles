@@ -1,0 +1,160 @@
+{
+  "bar": {
+    "centerAnchor": "omarchy.clock",
+    "layout": {
+      "center": [
+        {
+          "id": "omarchy.indicators"
+        },
+        {
+          "id": "omarchy.keyboard-layout"
+        },
+        {
+          "format": "ddd d MMM HH:mm",
+          "id": "omarchy.clock"
+        },
+        {
+          "id": "omarchy.weather"
+        },
+        {
+          "id": "dizziee.system-updates"
+        },
+        {
+          "id": "eduardodallecort.weather-radar",
+          "alertMinIntensity": "Light",
+          "alertRadiusKm": 50,
+          "alertsEnabled": false
+        },
+        {
+          "audioQuality": "320 kbps",
+          "id": "quickshell.ytmusic",
+          "idleShutdownMinutes": 15,
+          "searchHistory": "[]",
+          "sessionState": "{\"tab\":\"home\",\"searchText\":\"\",\"libraryType\":\"tracks\",\"libraryFilter\":\"\",\"detailFilter\":\"\",\"detailItem\":null}",
+          "shortcutPlayer": "Omarchy Music app",
+          "showMiniPlayer": "On"
+        },
+        {
+          "id": "omarchy.microphone"
+        },
+        {
+          "id": "omarchy.system-update"
+        }
+      ],
+      "left": [
+        {
+          "id": "tyrsolution.app-launcher"
+        },
+        {
+          "id": "omarchy.menu"
+        },
+        {
+          "id": "omarchy.workspaces"
+        },
+        {
+          "id": "io.github.twiking.omasettings"
+        },
+        {
+          "id": "io.github.yogeshojha.blip"
+        },
+        {
+          "id": "io.github.brm-src.plugin-control-center"
+        },
+        {
+          "id": "omarchy.active-window"
+        }
+      ],
+      "right": [
+        {
+          "id": "omarchy.tray"
+        },
+        {
+          "id": "better.displays"
+        },
+        {
+          "id": "omarchy.tailscale"
+        },
+        {
+          "id": "subi.agents"
+        },
+        {
+          "id": "rosakodu.dock"
+        },
+        {
+          "id": "tenzin.auto-workspace"
+        },
+        {
+          "device": "",
+          "id": "io.github.kristoferlund.webcam"
+        },
+        {
+          "id": "io.github.grichard99.omaproton-vpn"
+        },
+        {
+          "id": "ssupt.audio-control"
+        },
+        {
+          "id": "im0001gt.hw-tooltip"
+        },
+        {
+          "id": "omarchy.bluetooth"
+        },
+        {
+          "id": "omarchy.network"
+        },
+        {
+          "id": "crmne.hyprmoncfg"
+        },
+        {
+          "id": "omarchy.monitor"
+        },
+        {
+          "id": "jankeesvw.notification-center"
+        },
+        {
+          "id": "omarchy.power",
+          "showPercentage": true
+        }
+      ]
+    },
+    "position": "bottom",
+    "transparent": false
+  },
+  "cloneSourceRestores": [
+    "io.github.sirjul1337.lock-explorer",
+    "ssupt.audio-control",
+    "subi.notifications"
+  ],
+  "disabledPlugins": [
+    "omarchy.lock",
+    "omarchy.audio",
+    "omarchy.notifications"
+  ],
+  "idle": {
+    "lock": 300,
+    "screensaver": 150
+  },
+  "plugins": [
+    {
+      "id": "mirador"
+    },
+    {
+      "design": "island",
+      "id": "io.github.sirjul1337.lock-explorer"
+    },
+    {
+      "id": "bobbynicholas.omaland"
+    },
+    {
+      "id": "tyrsolution.app-launcher"
+    },
+    {
+      "hotCornerEnabled": false,
+      "id": "expose.window-overview"
+    },
+    {
+      "id": "subi.notifications"
+    }
+  ],
+  "version": 1
+}

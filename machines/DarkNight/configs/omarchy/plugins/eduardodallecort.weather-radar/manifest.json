@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 1,
+  "id": "eduardodallecort.weather-radar",
+  "name": "Weather Radar",
+  "version": "0.2.1",
+  "author": "Eduardo Dalle Cort",
+  "license": "MIT",
+  "description": "Live weather radar map in the Omarchy bar, with optional storm alerts for your location.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Weather Radar",
+    "description": "Weather radar map with a two-hour loop, plus optional alerts when precipitation approaches.",
+    "category": "Info",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "alertsEnabled": false,
+      "alertRadiusKm": 100,
+      "alertMinIntensity": "Heavy",
+      "colorScheme": "TITAN",
+      "defaultZoom": 7,
+      "smoothTiles": true,
+      "showSnow": true,
+      "showLabel": false
+    },
+    "schema": [
+      {
+        "key": "alertsEnabled",
+        "type": "boolean",
+        "label": "Storm alerts",
+        "defaultValue": false,
+        "description": "Notify when rain or a storm is forecast to reach you from within the alert radius. Also toggleable from the panel."
+      },
+      {
+        "key": "alertRadiusKm",
+        "type": "integer",
+        "label": "Alert radius (km)",
+        "min": 25,
+        "max": 250,
+        "step": 25,
+        "defaultValue": 100,
+        "description": "How far out to watch, and with it how far ahead to look: storms travel 40-60 km/h, so 100 km is roughly two hours of warning. The panel offers the common values; any step of 25 works here."
+      },
+      {
+        "key": "alertMinIntensity",
+        "type": "enum",
+        "label": "Alert threshold",
+        "options": [
+          "Light",
+          "Moderate",
+          "Heavy",
+          "Severe"
+        ],
+        "defaultValue": "Heavy",
+        "description": "Minimum forecast rain rate worth a notification. Moderate or heavier arriving into an unstable airmass counts one band up, so a storm crosses the threshold sooner than steady rain of the same rate."
+      },
+      {
+        "key": "colorScheme",
+        "type": "enum",
+        "label": "Colour scheme",
+        "options": [
+          "TITAN",
+          "Meteored",
+          "NEXRAD Level III",
+          "Rainbow",
+          "The Weather Channel",
+          "Universal Blue",
+          "Dark Sky",
+          "Greyscale"
+        ],
+        "defaultValue": "TITAN",
+        "description": "Radar palette. NEXRAD Level III matches what most broadcast meteorologists show."
+      },
+      {
+        "key": "defaultZoom",
+        "type": "integer",
+        "label": "Default zoom",
+        "min": 3,
+        "max": 9,
+        "step": 1,
+        "defaultValue": 7,
+        "description": "Zoom the map opens at. Past level 7 the ground keeps sharpening while the radar is scaled up, since that is where the radar data runs out."
+      },
+      {
+        "key": "smoothTiles",
+        "type": "boolean",
+        "label": "Smooth radar",
+        "defaultValue": true,
+        "description": "Blend the radar image instead of showing hard pixel edges."
+      },
+      {
+        "key": "showSnow",
+        "type": "boolean",
+        "label": "Distinguish snow",
+        "defaultValue": true,
+        "description": "Colour snow separately from rain."
+      },
+      {
+        "key": "showLabel",
+        "type": "boolean",
+        "label": "Show status text in bar",
+        "defaultValue": false,
+        "description": "Print the outlook next to the bar icon: what is approaching, and when. Requires storm alerts to be on, since what it prints is their forecast."
+      }
+    ]
+  }
+}

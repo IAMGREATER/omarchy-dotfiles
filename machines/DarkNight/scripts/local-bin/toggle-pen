@@ -1,0 +1,221 @@
+#!/usr/bin/env python3
+import fcntl
+import glob
+import os
+import signal
+import subprocess
+import sys
+import time
+
+EVIOCGRAB = 1074021776  # 0x40044590: _IOW('E', 0x90, int)
+STATE_DIR = os.path.expanduser("~/.local/state/omarchy/toggles")
+PEN_PID_FILE = os.path.join(STATE_DIR, "pen_grabber.pid")
+HYPR_TOGGLE_FILE = os.path.expanduser("~/.local/state/omarchy/toggles/hypr/pen-disabled.lua")
+
+TOUCHPAD_DEVICES = [
+    "synac780:00-06cb:cf00-touchpad",
+    "synac780:00-06cb:cf00-mouse",
+    "easystroke-wayland-virtual-input-1",
+]
+
+
+def find_pen_devices():
+    """Find event devices for the touchscreen pen/stylus."""
+    pen_devices = []
+    for name_path in sorted(glob.glob("/sys/class/input/input*/name")):
+        try:
+            with open(name_path, "r") as f:
+                name = f.read().strip()
+        except Exception:
+            continue
+        if "pen" in name.lower() and "deco" not in name.lower():
+            input_dir = os.path.dirname(name_path)
+            for ev in sorted(glob.glob(os.path.join(input_dir, "event*"))):
+                ev_name = os.path.basename(ev)
+                dev_path = f"/dev/input/{ev_name}"
+                if os.path.exists(dev_path):
+                    pen_devices.append((name, dev_path))
+    return pen_devices
+
+
+def show_osd(icon, message):
+    try:
+        subprocess.run(["omarchy-osd", "-i", icon, "-m", message], timeout=2)
+    except Exception:
+        try:
+            subprocess.run(["notify-send", "-u", "low", "Stylus Mode", message], timeout=2)
+        except Exception:
+            pass
+
+
+def is_pen_disabled():
+    if not os.path.exists(PEN_PID_FILE):
+        return False
+    try:
+        with open(PEN_PID_FILE, "r") as f:
+            pid = int(f.read().strip())
+        os.kill(pid, 0)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def run_pen_grabber_daemon():
+    devices = find_pen_devices()
+    if not devices:
+        print("No touchscreen pen device found to grab.", file=sys.stderr)
+        sys.exit(1)
+
+    fds = []
+    for name, path in devices:
+        try:
+            fd = open(path, "rb")
+            fcntl.ioctl(fd.fileno(), EVIOCGRAB, 1)
+            fds.append(fd)
+        except Exception as e:
+            print(f"Failed to grab {name} ({path}): {e}", file=sys.stderr)
+
+    if not fds:
+        sys.exit(1)
+
+    os.makedirs(STATE_DIR, exist_ok=True)
+    with open(PEN_PID_FILE, "w") as f:
+        f.write(str(os.getpid()))
+
+    def handle_signal(sig, frame):
+        for fd in fds:
+            try:
+                fcntl.ioctl(fd.fileno(), EVIOCGRAB, 0)
+                fd.close()
+            except Exception:
+                pass
+        try:
+            os.remove(PEN_PID_FILE)
+        except Exception:
+            pass
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, handle_signal)
+    signal.signal(signal.SIGINT, handle_signal)
+
+    while True:
+        time.sleep(3600)
+
+
+def set_touchpad_and_gestures(enabled: bool):
+    """Enable or disable touchpad and background gesture forwarding."""
+    # 1. Update Hyprland devices
+    for dev in TOUCHPAD_DEVICES:
+        try:
+            subprocess.run(
+                ["hyprctl", "eval", f'hl.device({{ name = "{dev}", enabled = {"true" if enabled else "false"} }})'],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=1,
+            )
+        except Exception:
+            pass
+
+    # 2. Pause / Resume easystroke daemon if running
+    try:
+        res = subprocess.run(["pgrep", "-f", "eswl-daemon"], capture_output=True, text=True, timeout=1)
+        pids = [int(p) for p in res.stdout.strip().split() if p]
+        sig = signal.SIGCONT if enabled else signal.SIGSTOP
+        for pid in pids:
+            try:
+                os.kill(pid, sig)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def disable_pen(silent=False):
+    # Enable touchpad & gesture services
+    set_touchpad_and_gestures(True)
+
+    # Grab pen device
+    if not is_pen_disabled():
+        devices = find_pen_devices()
+        if devices:
+            os.makedirs(STATE_DIR, exist_ok=True)
+            subprocess.Popen(
+                [sys.executable, os.path.abspath(__file__), "--daemon-pen"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+
+    os.makedirs(os.path.dirname(HYPR_TOGGLE_FILE), exist_ok=True)
+    with open(HYPR_TOGGLE_FILE, "w") as f:
+        f.write("-- Touchscreen pen disabled\n")
+
+    if not silent:
+        show_osd("touch", "Pen disabled • Touchpad active")
+
+
+def enable_pen(silent=False):
+    # Release pen device
+    if os.path.exists(PEN_PID_FILE):
+        try:
+            with open(PEN_PID_FILE, "r") as f:
+                pid = int(f.read().strip())
+            os.kill(pid, signal.SIGTERM)
+        except Exception:
+            pass
+        try:
+            os.remove(PEN_PID_FILE)
+        except Exception:
+            pass
+
+    if os.path.exists(HYPR_TOGGLE_FILE):
+        try:
+            os.remove(HYPR_TOGGLE_FILE)
+        except Exception:
+            pass
+
+    # Mute touchpad & gesture services during pen mode
+    set_touchpad_and_gestures(False)
+
+    if not silent:
+        show_osd("touch", "Pen enabled • Touchpad muted")
+
+
+def toggle_pen():
+    if is_pen_disabled():
+        enable_pen()
+    else:
+        disable_pen()
+
+
+def restore_state():
+    if os.path.exists(HYPR_TOGGLE_FILE):
+        disable_pen(silent=True)
+    else:
+        enable_pen(silent=True)
+
+
+def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--daemon-pen":
+        run_pen_grabber_daemon()
+        return
+
+    action = sys.argv[1] if len(sys.argv) > 1 else "toggle"
+
+    if action in ("off", "disable"):
+        disable_pen()
+    elif action in ("on", "enable"):
+        enable_pen()
+    elif action == "status":
+        print("disabled" if is_pen_disabled() else "enabled")
+    elif action == "restore":
+        restore_state()
+    elif action == "toggle":
+        toggle_pen()
+    else:
+        print(f"Usage: {sys.argv[0]} [on|off|toggle|status|restore]")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

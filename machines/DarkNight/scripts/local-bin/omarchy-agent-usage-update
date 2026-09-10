@@ -1,0 +1,23 @@
+#!/bin/bash
+USAGE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/agents/usage"
+mkdir -p "$USAGE_DIR"
+
+# 1. Run native omarchy-agent-usage-update from /usr/bin if it exists
+if [[ -x /usr/bin/omarchy-agent-usage-update ]]; then
+  /usr/bin/omarchy-agent-usage-update "$@"
+fi
+
+# 2. Run user-defined collectors in ~/.local/bin/omarchy-agent-usage-*
+for collector in "$HOME"/.local/bin/omarchy-agent-usage-*; do
+  [[ -x "$collector" ]] || continue
+  agent="${collector##*/omarchy-agent-usage-}"
+  [[ "$agent" == "update" || "$agent" == "notify" ]] && continue
+  
+  tmp=$(mktemp "$USAGE_DIR/.$agent.XXXXXX")
+  if record=$("$collector" "$@") && [[ -n "$record" ]] && jq -e . >/dev/null 2>&1 <<<"$record"; then
+    printf '%s\n' "$record" > "$tmp"
+    mv "$tmp" "$USAGE_DIR/$agent.json"
+  else
+    rm -f "$tmp"
+  fi
+done

@@ -1,0 +1,17 @@
+ssupt.audio-control
+subi.agents
+tyrsolution.app-launcher
+tenzin.auto-workspace
+better.displays
+io.github.yogeshojha.blip
+rosakodu.dock
+expose.window-overview
+im0001gt.hw-tooltip
+io.github.sirjul1337.lock-explorer
+mirador
+subi.notifications
+jankeesvw.notification-center
+io.github.grichard99.omaproton-vpn
+io.github.twiking.omasettings
+eduardodallecort.weather-radar
+io.github.kristoferlund.webcam

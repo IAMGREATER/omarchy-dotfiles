@@ -1,0 +1,242 @@
+.pragma library
+
+function normalizedAddress(value) {
+  var address = String(value || "").trim().toLowerCase()
+  if (!address.match(/^(0x)?[0-9a-f]+$/)) return ""
+  return address.indexOf("0x") === 0 ? address : "0x" + address
+}
+
+function ipcObject(toplevel) {
+  return toplevel && toplevel.lastIpcObject ? toplevel.lastIpcObject : null
+}
+
+function toplevelAddress(toplevel) {
+  var ipc = ipcObject(toplevel)
+  return normalizedAddress((toplevel && toplevel.address) || (ipc && ipc.address))
+}
+
+function groupAddresses(toplevel) {
+  var ipc = ipcObject(toplevel)
+  // QVariantList values from Qt are array-like but are not guaranteed to pass
+  // JavaScript's Array.isArray(), unlike the plain arrays used by unit tests.
+  var grouped = ipc && ipc.grouped && typeof ipc.grouped.length === "number"
+    ? ipc.grouped : []
+  if (grouped.length === 0) return []
+
+  var addresses = []
+  for (var i = 0; i < grouped.length; i++) {
+    var address = normalizedAddress(grouped[i])
+    if (address && addresses.indexOf(address) === -1) addresses.push(address)
+  }
+
+  var ownAddress = toplevelAddress(toplevel)
+  if (ownAddress && addresses.indexOf(ownAddress) === -1) addresses.push(ownAddress)
+  return ownAddress && addresses.length >= 2 ? addresses : []
+}
+
+function componentRoot(parents, address) {
+  var root = address
+  while (parents[root] && parents[root] !== root) root = parents[root]
+  while (parents[address] && parents[address] !== address) {
+    var next = parents[address]
+    parents[address] = root
+    address = next
+  }
+  return root
+}
+
+function unionAddresses(parents, left, right) {
+  if (!parents[left]) parents[left] = left
+  if (!parents[right]) parents[right] = right
+  var leftRoot = componentRoot(parents, left)
+  var rightRoot = componentRoot(parents, right)
+  if (leftRoot !== rightRoot) parents[rightRoot] = leftRoot
+}
+
+function betterGroupRepresentative(candidate, current, activeAddress) {
+  if (!current) return true
+
+  var candidateIpc = ipcObject(candidate) || {}
+  var currentIpc = ipcObject(current) || {}
+
+  // 1. Hidden state: hidden === true (e.g. minimized/hidden window) is strongly deprioritized
+  var candidateHidden = candidateIpc.hidden === true
+  var currentHidden = currentIpc.hidden === true
+  if (!candidateHidden && currentHidden) return true
+  if (candidateHidden && !currentHidden) return false
+
+  // 2. Active window address match: if Hyprland's current active window belongs to the group, it wins
+  var normActive = normalizedAddress(activeAddress)
+  if (normActive) {
+    var candidateAddr = toplevelAddress(candidate)
+    var currentAddr = toplevelAddress(current)
+    if (candidateAddr === normActive && currentAddr !== normActive) return true
+    if (candidateAddr !== normActive && currentAddr === normActive) return false
+  }
+
+  // 3. acceptsInput check: in Hyprland, active group tab accepts input while background tabs do not
+  var candidateInput = candidateIpc.acceptsInput === true
+  var currentInput = currentIpc.acceptsInput === true
+  if (candidateInput && !currentInput) return true
+  if (!candidateInput && currentInput) return false
+
+  // 4. focusHistoryID check: lower ID indicates more recently focused tab
+  var candidateFocus = Number(candidateIpc.focusHistoryID)
+  var currentFocus = Number(currentIpc.focusHistoryID)
+  var candidateHasFocus = isFinite(candidateFocus) && candidateFocus >= 0
+  var currentHasFocus = isFinite(currentFocus) && currentFocus >= 0
+
+  if (candidateHasFocus && !currentHasFocus) return true
+  if (!candidateHasFocus && currentHasFocus) return false
+  if (candidateHasFocus && currentHasFocus && candidateFocus !== currentFocus) {
+    return candidateFocus < currentFocus
+  }
+
+  // 5. visible flag fallback
+  if (candidateIpc.visible === true && currentIpc.visible !== true) return true
+  if (candidateIpc.visible !== true && currentIpc.visible === true) return false
+
+  // 6. Stable fallback
+  return false
+}
+
+// Resolve workspace toplevels into structured spatial preview descriptors.
+// For Hyprland groups, exactly one spatial preview is produced with isGroup: true,
+// referencing the active member for screencopy/geometry and retaining all group members.
+function resolveWorkspacePreviews(clients, activeAddress) {
+  var values = clients || []
+  var parents = {}
+  var ownAddresses = []
+
+  // Build connected components for grouped windows
+  for (var i = 0; i < values.length; i++) {
+    var ownAddress = toplevelAddress(values[i])
+    var addresses = groupAddresses(values[i])
+    ownAddresses[i] = ownAddress
+    if (addresses.length < 2) continue
+    for (var addressIndex = 0; addressIndex < addresses.length; addressIndex++) {
+      unionAddresses(parents, ownAddress, addresses[addressIndex])
+    }
+  }
+
+  // Group members and find best representative for each group
+  var groupMembersMap = {}
+  var representatives = {}
+  var keys = []
+
+  for (var candidateIndex = 0; candidateIndex < values.length; candidateIndex++) {
+    var candidateAddress = ownAddresses[candidateIndex]
+    var key = candidateAddress && parents[candidateAddress]
+      ? componentRoot(parents, candidateAddress) : ""
+    keys[candidateIndex] = key
+
+    if (key) {
+      if (!groupMembersMap[key]) groupMembersMap[key] = []
+      groupMembersMap[key].push(values[candidateIndex])
+      if (betterGroupRepresentative(values[candidateIndex], representatives[key], activeAddress)) {
+        representatives[key] = values[candidateIndex]
+      }
+    }
+  }
+
+  var result = []
+  var seenKeys = {}
+
+  for (var j = 0; j < values.length; j++) {
+    var clientKey = keys[j]
+    var client = values[j]
+
+    if (!clientKey) {
+      // Normal ungrouped window or null
+      result.push({
+        type: "window",
+        isGroup: false,
+        toplevel: client,
+        activeMember: client,
+        members: client ? [client] : [],
+        memberCount: client ? 1 : 0,
+        address: toplevelAddress(client),
+        lastIpcObject: ipcObject(client),
+        monitor: client ? client.monitor : null,
+        wayland: client ? client.wayland : null,
+        title: client ? (client.title || "") : ""
+      })
+    } else if (!seenKeys[clientKey]) {
+      seenKeys[clientKey] = true
+      var rep = representatives[clientKey] || client
+      var members = groupMembersMap[clientKey] || [rep]
+      var isRealGroup = members.length > 1
+
+      result.push({
+        type: isRealGroup ? "group" : "window",
+        isGroup: isRealGroup,
+        toplevel: rep,
+        activeMember: rep,
+        members: members,
+        memberCount: members.length,
+        address: toplevelAddress(rep),
+        lastIpcObject: ipcObject(rep),
+        monitor: rep ? rep.monitor : null,
+        wayland: rep ? rep.wayland : null,
+        title: rep ? (rep.title || "") : ""
+      })
+    }
+  }
+
+  return result
+}
+
+// Return active member toplevels for callers expecting plain client arrays.
+function visibleWorkspaceWindows(clients, activeAddress) {
+  var previews = resolveWorkspacePreviews(clients, activeAddress)
+  var result = []
+  for (var i = 0; i < previews.length; i++) {
+    result.push(previews[i] ? previews[i].toplevel : null)
+  }
+  return result
+}
+
+// Check whether a workspace object or ID represents a special/scratchpad workspace.
+// Prioritizes explicit name and type checks (e.g. "special:scratchpad", isSpecial, isScratchpad)
+// while retaining negative IDs as compositor fallback metadata.
+function isSpecialWorkspace(ws) {
+  if (ws === null || ws === undefined) return false
+  if (typeof ws === "string") {
+    return ws === "special" || ws.indexOf("special:") === 0
+  }
+  if (typeof ws === "object") {
+    if (ws.isSpecial !== undefined && ws.isSpecial !== null) return Boolean(ws.isSpecial)
+    if (ws.isScratchpad !== undefined && ws.isScratchpad !== null) return Boolean(ws.isScratchpad)
+    var name = String(ws.name || "")
+    if (name === "special" || name.indexOf("special:") === 0) return true
+    var idNum = Number(ws.id)
+    if (!isNaN(idNum) && idNum < 0) return true
+    return false
+  }
+  if (typeof ws === "number") return ws < 0
+  return false
+}
+
+// Extract the target name for Hyprland dispatchers (e.g. "scratchpad" for togglespecialworkspace)
+function specialWorkspaceName(ws) {
+  if (ws === null || ws === undefined) return "scratchpad"
+  if (typeof ws === "string") {
+    if (ws.indexOf("special:") === 0) return ws.slice(8)
+    if (ws === "special") return "scratchpad"
+    return ws
+  }
+  if (ws.specialName) return String(ws.specialName)
+  var name = String(ws.name || "")
+  if (name.indexOf("special:") === 0) return name.slice(8)
+  if (name === "special") return "scratchpad"
+  return name || "scratchpad"
+}
+
+// Compute the badge display label for any workspace card ("S" for scratchpads, "0" for 10)
+function workspaceBadgeText(workspaceId, isScratchpad) {
+  if (isScratchpad || (typeof workspaceId === "number" && workspaceId < 0)) return "S"
+  var idNum = Number(workspaceId)
+  if (idNum === 10) return "0"
+  return String(workspaceId !== undefined && workspaceId !== null ? workspaceId : "")
+}
+
