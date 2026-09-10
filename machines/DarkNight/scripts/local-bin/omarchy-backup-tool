@@ -332,6 +332,44 @@ class BackupWindow(Adw.ApplicationWindow):
     def machine_root(self, repo):
         return os.path.join(repo, "machines", self.machine_name)
 
+    def ensure_git_repo(self, repo):
+        os.makedirs(repo, exist_ok=True)
+        if os.path.isdir(os.path.join(repo, ".git")):
+            return
+
+        result = subprocess.run(
+            self.git_command(repo, "init", "-b", "main"),
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Could not initialize Git repository: {result.stderr.strip()}")
+
+        remote = "https://github.com/IAMGREATER/omarchy-dotfiles.git"
+        result = subprocess.run(
+            self.git_command(repo, "remote", "add", "origin", remote),
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Could not configure Git remote: {result.stderr.strip()}")
+
+        result = subprocess.run(
+            self.git_command(repo, "fetch", "origin", "main"),
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Could not fetch GitHub repository: {result.stderr.strip()}")
+
+        result = subprocess.run(
+            self.git_command(repo, "checkout", "-b", "main", "--track", "origin/main"),
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Could not check out GitHub repository: {result.stderr.strip()}")
+
     def build_backup_page(self):
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_vexpand(True)
@@ -635,7 +673,7 @@ class BackupWindow(Adw.ApplicationWindow):
             date_str = datetime.now().strftime("%d-%m-%Y")
             repo = self.repo_dir
             backup_root = self.machine_root(repo)
-            os.makedirs(repo, exist_ok=True)
+            self.ensure_git_repo(repo)
             os.makedirs(backup_root, exist_ok=True)
 
             total_steps = len(selected_items) + 3
