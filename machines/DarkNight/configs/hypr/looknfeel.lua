@@ -1,0 +1,108 @@
+-- Change the default Omarchy look'n'feel.
+
+-- https://wiki.hypr.land/Configuring/Basics/Variables/#general
+-- hl.config({
+--   general = {
+--     -- No gaps between windows or borders.
+--     gaps_in = 0,
+--     gaps_out = 0,
+--     border_size = 0,
+--
+--     -- Change to niri-like side-scrolling layout.
+--     layout = "scrolling",
+--   },
+-- })
+
+-- https://wiki.hypr.land/Configuring/Basics/Variables/#decoration
+-- hl.config({
+--   decoration = {
+--     -- Use round window corners.
+--     rounding = 8,
+--
+--     -- Dim unfocused windows (0.0 = no dim, 1.0 = fully dimmed).
+--     dim_inactive = true,
+--     dim_strength = 0.15,
+--   },
+-- })
+
+-- https://wiki.hypr.land/Configuring/Basics/Variables/#animations
+-- hl.config({
+--   animations = {
+--     -- Disable all animations.
+--     enabled = false,
+--   },
+-- })
+
+-- https://wiki.hypr.land/Configuring/Basics/Variables/#layout
+-- hl.config({
+--   layout = {
+--     -- Avoid overly wide single-window layouts on wide screens.
+--     single_window_aspect_ratio = { 1, 1 },
+--   },
+-- })
+
+-- https://wiki.hypr.land/Configuring/Layouts/Scrolling-Layout/
+-- hl.config({
+--   scrolling = {
+--     -- See only one column per screen instead of two.
+--     column_width = 0.97,
+--   },
+-- })
+
+-- >>> omaland managed block >>>
+-- Written by Omaland. Safe to hand-edit: Omaland re-reads this block
+-- every time it opens, and only ever rewrites what's between the fences.
+hl.config({
+  decoration = {
+    dim_inactive = false,
+    rounding = 16,
+
+    glow = {
+      enabled = false,
+    },
+
+    shadow = {
+      enabled = true,
+      range = 10,
+    },
+  },
+
+  dwindle = {
+    force_split = 2,
+    preserve_split = true,
+    smart_resizing = true,
+    smart_split = false,
+  },
+
+  general = {
+    border_size = 1,
+    extend_border_grab_area = 15,
+    gaps_in = 1,
+    gaps_out = 2,
+    hover_icon_on_border = true,
+    resize_on_border = true,
+
+    snap = {
+      enabled = true,
+      window_gap = 8,
+    },
+  },
+})
+
+hl.animation({ leaf = "global", enabled = true, speed = 12.5, bezier = "default" })
+hl.animation({ leaf = "border", enabled = true, speed = 6.74, bezier = "easeOutQuint" })
+hl.animation({ leaf = "windows", enabled = true, speed = 4.74, bezier = "easeOutQuint" })
+hl.animation({ leaf = "windowsIn", enabled = true, speed = 5.12, bezier = "easeOutQuint", style = "popin 87%" })
+hl.animation({ leaf = "windowsOut", enabled = true, speed = 1.86, bezier = "linear", style = "popin 87%" })
+hl.animation({ leaf = "fadeIn", enabled = true, speed = 2.16, bezier = "almostLinear" })
+hl.animation({ leaf = "fadeOut", enabled = true, speed = 1.83, bezier = "almostLinear" })
+hl.animation({ leaf = "fade", enabled = true, speed = 3.79, bezier = "quick" })
+hl.animation({ leaf = "fadeSwitch", enabled = false })
+hl.animation({ leaf = "layers", enabled = true, speed = 4.76, bezier = "easeOutQuint" })
+hl.animation({ leaf = "layersIn", enabled = true, speed = 5, bezier = "easeOutQuint", style = "fade" })
+hl.animation({ leaf = "layersOut", enabled = true, speed = 1.88, bezier = "linear", style = "fade" })
+hl.animation({ leaf = "fadeLayersIn", enabled = true, speed = 2.24, bezier = "almostLinear" })
+hl.animation({ leaf = "fadeLayersOut", enabled = true, speed = 1.74, bezier = "almostLinear" })
+hl.animation({ leaf = "workspaces", enabled = false })
+hl.animation({ leaf = "specialWorkspace", enabled = true, speed = 3.75, bezier = "easeOutQuint", style = "slidevert" })
+-- <<< omaland managed block <<<

@@ -1,0 +1,866 @@
+#!/usr/bin/env python3
+"""
+Omarchy Backup Hub
+A GTK4 + Libadwaita application for incremental backup and restoration
+of Omarchy Linux configurations, custom plugins, keybindings, and packages.
+"""
+
+import os
+import sys
+import subprocess
+import threading
+import glob
+import json
+import base64
+import tempfile
+import stat
+import re
+import socket
+from datetime import datetime
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import Gtk, Adw, GLib, Gio
+
+BACKUP_CATEGORIES = [
+    {
+        "id": "hypr",
+        "title": "Hyprland & Display Configuration",
+        "subtitle": "Keybindings, window rules, monitors (~/.config/hypr)",
+        "source": os.path.expanduser("~/.config/hypr"),
+        "dest_sub": "configs/hypr",
+        "restore_dest": os.path.expanduser("~/.config/hypr"),
+        "default": True,
+    },
+    {
+        "id": "omarchy",
+        "title": "Omarchy Shell & Custom Plugins",
+        "subtitle": "Shell settings, custom code, metadata (~/.config/omarchy)",
+        "source": os.path.expanduser("~/.config/omarchy"),
+        "dest_sub": "configs/omarchy",
+        "restore_dest": os.path.expanduser("~/.config/omarchy"),
+        "exclude": [
+            "plugins/*/.git",
+            "plugins/*/node_modules",
+            "blip/data",
+            "*.lock",
+        ],
+        "default": True,
+    },
+    {
+        "id": "easystroke",
+        "title": "WeazyStroke Gestures",
+        "subtitle": "Mouse gestures & trigger settings (~/.config/easystroke-wayland)",
+        "source": os.path.expanduser("~/.config/easystroke-wayland"),
+        "dest_sub": "configs/easystroke-wayland",
+        "restore_dest": os.path.expanduser("~/.config/easystroke-wayland"),
+        "exclude": ["*.bak*", "history.jsonl"],
+        "default": True,
+    },
+    {
+        "id": "terminals",
+        "title": "Terminal Configurations",
+        "subtitle": "Ghostty, Alacritty, Kitty (~/.config/ghostty, alacritty, kitty)",
+        "sources": [
+            (os.path.expanduser("~/.config/ghostty"), "configs/ghostty", os.path.expanduser("~/.config/ghostty")),
+            (os.path.expanduser("~/.config/alacritty"), "configs/alacritty", os.path.expanduser("~/.config/alacritty")),
+            (os.path.expanduser("~/.config/kitty"), "configs/kitty", os.path.expanduser("~/.config/kitty")),
+        ],
+        "default": True,
+    },
+    {
+        "id": "audio",
+        "title": "Audio & PipeWire Settings",
+        "subtitle": "Echo cancellation and WirePlumber configs (~/.config/pipewire, wireplumber)",
+        "sources": [
+            (os.path.expanduser("~/.config/pipewire"), "configs/pipewire", os.path.expanduser("~/.config/pipewire")),
+            (os.path.expanduser("~/.config/wireplumber"), "configs/wireplumber", os.path.expanduser("~/.config/wireplumber")),
+        ],
+        "default": True,
+    },
+    {
+        "id": "imv",
+        "title": "Image Viewer (imv)",
+        "subtitle": "Keybindings, non-looping navigation (~/.config/imv)",
+        "source": os.path.expanduser("~/.config/imv"),
+        "dest_sub": "configs/imv",
+        "restore_dest": os.path.expanduser("~/.config/imv"),
+        "default": True,
+    },
+    {
+        "id": "services",
+        "title": "User Systemd Services",
+        "subtitle": "WeazyStroke, auto-start units (~/.config/systemd/user)",
+        "source": os.path.expanduser("~/.config/systemd/user"),
+        "dest_sub": "configs/systemd-user",
+        "restore_dest": os.path.expanduser("~/.config/systemd/user"),
+        "default": True,
+    },
+    {
+        "id": "scripts",
+        "title": "Custom Scripts (~/.local/bin)",
+        "subtitle": "Helper utilities, toggles, runners, and agent tools",
+        "source": os.path.expanduser("~/.local/bin"),
+        "dest_sub": "scripts/local-bin",
+        "restore_dest": os.path.expanduser("~/.local/bin"),
+        "exclude": ["agy", "eswl-daemon", "claude", "codex", "gh", "ghui", "grok", "crush", "gemini", "copilot", "*.bak*", "__pycache__"],
+        "default": True,
+    },
+    {
+        "id": "shell_profiles",
+        "title": "Shell Profiles & Dotfiles",
+        "subtitle": ".zshrc, .bashrc, .bash_profile, starship.toml",
+        "files": [
+            (os.path.expanduser("~/.zshrc"), "scripts/zshrc", os.path.expanduser("~/.zshrc")),
+            (os.path.expanduser("~/.bashrc"), "scripts/bashrc", os.path.expanduser("~/.bashrc")),
+            (os.path.expanduser("~/.bash_profile"), "scripts/bash_profile", os.path.expanduser("~/.bash_profile")),
+            (os.path.expanduser("~/.config/starship.toml"), "configs/starship.toml", os.path.expanduser("~/.config/starship.toml")),
+        ],
+        "default": True,
+    },
+    {
+        "id": "packages",
+        "title": "Installed Packages & Plugins Manifest",
+        "subtitle": "Pacman explicit, AUR list, Omarchy plugins, mise tools",
+        "generator": True,
+        "default": True,
+    },
+]
+
+class BackupApp(Adw.Application):
+    def __init__(self):
+        super().__init__(application_id="org.omarchy.BackupHub", flags=Gio.ApplicationFlags.FLAGS_NONE)
+
+    def do_activate(self):
+        win = BackupWindow(application=self)
+        win.present()
+
+class BackupWindow(Adw.ApplicationWindow):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.set_title("Omarchy Backup Hub")
+        self.set_default_size(740, 840)
+
+        self.switches = {}
+        self.restore_switches = {}
+        self.repo_dir = os.path.expanduser("~/omarchy-dotfiles")
+        self.vault_base = "/run/media/subi/VAULT/Omarchy Backup"
+        self.custom_path = None
+        self.settings_path = os.path.expanduser("~/.config/omarchy-backup-hub/settings.json")
+        self.git_username, self.git_pat, self.machine_name = self.load_git_settings()
+        
+        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.set_content(main_box)
+
+        # Header Bar with View Switcher
+        header = Adw.HeaderBar()
+        self.view_stack = Adw.ViewStack()
+        
+        switcher_title = Adw.ViewSwitcherTitle()
+        switcher_title.set_stack(self.view_stack)
+        switcher_title.set_title("Omarchy Backup Hub")
+        header.set_title_widget(switcher_title)
+        main_box.append(header)
+
+        # Main View Stack
+        self.view_stack.set_vexpand(True)
+        main_box.append(self.view_stack)
+
+        # ------------------ TAB 1: BACKUP ------------------
+        backup_page = self.build_backup_page()
+        self.view_stack.add_titled_with_icon(backup_page, "backup", "Backup", "document-save-symbolic")
+
+        # ------------------ TAB 2: RESTORE ------------------
+        restore_page = self.build_restore_page()
+        self.view_stack.add_titled_with_icon(restore_page, "restore", "Restore", "edit-undo-symbolic")
+
+        settings_page = self.build_settings_page()
+        self.view_stack.add_titled_with_icon(settings_page, "settings", "Settings", "emblem-system-symbolic")
+
+        # View Switcher Bar for narrow widths
+        switcher_bar = Adw.ViewSwitcherBar()
+        switcher_bar.set_stack(self.view_stack)
+        main_box.append(switcher_bar)
+
+    def load_git_settings(self):
+        try:
+            with open(self.settings_path) as f:
+                settings = json.load(f)
+            return (
+                settings.get("git_username", ""),
+                settings.get("git_pat", ""),
+                settings.get("machine_name", socket.gethostname()),
+            )
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return "", "", socket.gethostname()
+
+    def build_settings_page(self):
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_vexpand(True)
+        clamp = Adw.Clamp()
+        clamp.set_maximum_size(700)
+        scrolled.set_child(clamp)
+
+        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        content_box.set_margin_top(16)
+        content_box.set_margin_bottom(24)
+        content_box.set_margin_start(16)
+        content_box.set_margin_end(16)
+        clamp.set_child(content_box)
+
+        group = Adw.PreferencesGroup(
+            title="GitHub Credentials",
+            description="Used only for pulling and pushing the configured backup repository.",
+        )
+        content_box.append(group)
+
+        self.machine_name_entry = Adw.EntryRow(title="Machine name")
+        self.machine_name_entry.set_text(self.machine_name)
+        group.add(self.machine_name_entry)
+
+        machine_note = Gtk.Label(
+            label="Backups are stored separately under machines/<name>/ so different PCs do not overwrite each other.",
+            wrap=True,
+        )
+        machine_note.set_xalign(0.0)
+        machine_note.add_css_class("dim-label")
+        content_box.append(machine_note)
+
+        self.git_username_entry = Adw.EntryRow(title="Git username")
+        self.git_username_entry.set_text(self.git_username)
+        group.add(self.git_username_entry)
+
+        self.git_pat_entry = Adw.PasswordEntryRow(title="Personal access token (PAT)")
+        self.git_pat_entry.set_text(self.git_pat)
+        group.add(self.git_pat_entry)
+
+        note = Gtk.Label(
+            label="The PAT is stored locally with owner-only permissions and is never written into the repository URL.",
+            wrap=True,
+        )
+        note.set_xalign(0.0)
+        note.add_css_class("dim-label")
+        content_box.append(note)
+
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        save = Gtk.Button(label="Save GitHub Credentials")
+        save.add_css_class("suggested-action")
+        save.connect("clicked", self.save_git_settings)
+        actions.append(save)
+
+        test = Gtk.Button(label="Test Credentials")
+        test.connect("clicked", self.test_git_settings)
+        actions.append(test)
+        content_box.append(actions)
+
+        self.settings_status = Gtk.Label()
+        self.settings_status.set_xalign(0.0)
+        content_box.append(self.settings_status)
+        return scrolled
+
+    def save_git_settings(self, _button):
+        self.git_username = self.git_username_entry.get_text().strip()
+        self.git_pat = self.git_pat_entry.get_text()
+        self.machine_name = re.sub(r"[^A-Za-z0-9._-]+", "-", self.machine_name_entry.get_text().strip()).strip("-")
+        if not self.machine_name:
+            self.settings_status.set_text("Enter a machine name first.")
+            return
+        try:
+            os.makedirs(os.path.dirname(self.settings_path), mode=0o700, exist_ok=True)
+            with open(self.settings_path, "w") as f:
+                json.dump(
+                    {
+                        "git_username": self.git_username,
+                        "git_pat": self.git_pat,
+                        "machine_name": self.machine_name,
+                    },
+                    f,
+                )
+            os.chmod(self.settings_path, stat.S_IRUSR | stat.S_IWUSR)
+            self.settings_status.set_text("GitHub credentials saved.")
+        except OSError as e:
+            self.settings_status.set_text(f"Could not save credentials: {e}")
+
+    def test_git_settings(self, _button):
+        username = self.git_username_entry.get_text().strip()
+        pat = self.git_pat_entry.get_text()
+        if not username or not pat:
+            self.settings_status.set_text("Enter both a GitHub username and PAT first.")
+            return
+
+        self.settings_status.set_text("Testing GitHub credentials...")
+
+        def run_test():
+            token = base64.b64encode(f"{username}:{pat}".encode()).decode()
+            command = [
+                "git",
+                "-c",
+                f"http.extraHeader=Authorization: Basic {token}",
+                "ls-remote",
+                "https://github.com/IAMGREATER/omarchy-dotfiles.git",
+                "HEAD",
+            ]
+            try:
+                result = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
+                )
+                if result.returncode == 0:
+                    message = "GitHub credentials work."
+                else:
+                    message = f"GitHub test failed: {result.stderr.strip()[:180]}"
+            except (OSError, subprocess.TimeoutExpired) as e:
+                message = f"GitHub test failed: {e}"
+            GLib.idle_add(self.settings_status.set_text, message)
+
+        thread = threading.Thread(target=run_test, daemon=True)
+        thread.start()
+
+    def git_command(self, repo, *args):
+        command = ["git", "-C", repo]
+        if self.git_username and self.git_pat:
+            token = base64.b64encode(
+                f"{self.git_username}:{self.git_pat}".encode()
+            ).decode()
+            command.extend(["-c", f"http.extraHeader=Authorization: Basic {token}"])
+        command.extend(args)
+        return command
+
+    def machine_root(self, repo):
+        return os.path.join(repo, "machines", self.machine_name)
+
+    def build_backup_page(self):
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_vexpand(True)
+
+        clamp = Adw.Clamp()
+        clamp.set_maximum_size(700)
+        scrolled.set_child(clamp)
+
+        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        content_box.set_margin_top(16)
+        content_box.set_margin_bottom(24)
+        content_box.set_margin_start(16)
+        content_box.set_margin_end(16)
+        clamp.set_child(content_box)
+
+        # Destinations Section
+        dest_group = Adw.PreferencesGroup(title="Backup Destinations", description="Choose where your incremental snapshot will be saved")
+        content_box.append(dest_group)
+
+        # GitHub Repo Row
+        self.github_row = Adw.ActionRow(title="GitHub Repository", subtitle="Sync changes to IAMGREATER/omarchy-dotfiles")
+        self.github_switch = Gtk.Switch()
+        self.github_switch.set_active(True)
+        self.github_switch.set_valign(Gtk.Align.CENTER)
+        self.github_row.add_suffix(self.github_switch)
+        self.github_row.set_activatable_widget(self.github_switch)
+        dest_group.add(self.github_row)
+
+        # VAULT External Drive Row
+        vault_connected = os.path.isdir("/run/media/subi/VAULT")
+        self.local_row = Adw.ActionRow(title="VAULT External Drive", subtitle="/run/media/subi/VAULT/Omarchy Backup" if vault_connected else "Drive not currently connected")
+        self.local_switch = Gtk.Switch()
+        self.local_switch.set_active(vault_connected)
+        self.local_switch.set_valign(Gtk.Align.CENTER)
+        self.local_row.add_suffix(self.local_switch)
+        self.local_row.set_activatable_widget(self.local_switch)
+        dest_group.add(self.local_row)
+
+        # Custom Folder Row
+        self.custom_row = Adw.ActionRow(title="Custom Directory Backup", subtitle="Disabled")
+        self.custom_switch = Gtk.Switch()
+        self.custom_switch.set_active(False)
+        self.custom_switch.set_valign(Gtk.Align.CENTER)
+        self.custom_switch.connect("notify::active", self.on_custom_toggle)
+        self.custom_row.add_suffix(self.custom_switch)
+
+        self.custom_choose_btn = Gtk.Button(label="Choose Folder...")
+        self.custom_choose_btn.set_valign(Gtk.Align.CENTER)
+        self.custom_choose_btn.set_sensitive(False)
+        self.custom_choose_btn.connect("clicked", self.on_choose_folder)
+        self.custom_row.add_suffix(self.custom_choose_btn)
+        dest_group.add(self.custom_row)
+
+        # Items Section
+        items_group = Adw.PreferencesGroup(title="Items to Backup (Incremental & Lean)", description="Only changes are synced; huge git trees and binaries are trimmed automatically")
+        content_box.append(items_group)
+
+        for cat in BACKUP_CATEGORIES:
+            row = Adw.ActionRow(title=cat["title"], subtitle=cat["subtitle"])
+            sw = Gtk.Switch()
+            sw.set_active(cat.get("default", True))
+            sw.set_valign(Gtk.Align.CENTER)
+            row.add_suffix(sw)
+            row.set_activatable_widget(sw)
+            items_group.add(row)
+            self.switches[cat["id"]] = sw
+
+        # Progress / Log Box
+        self.log_group = Adw.PreferencesGroup(title="Status & Activity")
+        content_box.append(self.log_group)
+
+        self.progress_bar = Gtk.ProgressBar()
+        self.progress_bar.set_fraction(0.0)
+        self.log_group.add(self.progress_bar)
+
+        self.status_label = Gtk.Label(label="Ready to backup.")
+        self.status_label.set_xalign(0.0)
+        self.status_label.set_margin_top(8)
+        self.log_group.add(self.status_label)
+
+        # Bottom Actions Bar
+        bottom_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        bottom_bar.set_margin_top(8)
+        bottom_bar.set_margin_bottom(16)
+        content_box.append(bottom_bar)
+
+        self.select_all_btn = Gtk.Button(label="Select All")
+        self.select_all_btn.connect("clicked", lambda b: self.set_all_switches(self.switches, True))
+        bottom_bar.append(self.select_all_btn)
+
+        self.deselect_btn = Gtk.Button(label="Deselect All")
+        self.deselect_btn.connect("clicked", lambda b: self.set_all_switches(self.switches, False))
+        bottom_bar.append(self.deselect_btn)
+
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        bottom_bar.append(spacer)
+
+        self.backup_btn = Gtk.Button(label="Start Backup Now")
+        self.backup_btn.add_css_class("suggested-action")
+        self.backup_btn.connect("clicked", self.on_start_backup)
+        bottom_bar.append(self.backup_btn)
+
+        return scrolled
+
+    def build_restore_page(self):
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_vexpand(True)
+
+        clamp = Adw.Clamp()
+        clamp.set_maximum_size(700)
+        scrolled.set_child(clamp)
+
+        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        content_box.set_margin_top(16)
+        content_box.set_margin_bottom(24)
+        content_box.set_margin_start(16)
+        content_box.set_margin_end(16)
+        clamp.set_child(content_box)
+
+        # Source Selection Section
+        source_group = Adw.PreferencesGroup(title="Restore Source", description="Choose where to restore configurations and data from")
+        content_box.append(source_group)
+
+        # Source Combo Row
+        self.source_row = Adw.ComboRow(title="Backup Source")
+        self.source_model = Gtk.StringList()
+        self.source_row.set_model(self.source_model)
+        self.source_row.connect("notify::selected", self.on_restore_source_changed)
+        source_group.add(self.source_row)
+
+        self.refresh_sources_btn = Gtk.Button(label="Refresh Available Backups")
+        self.refresh_sources_btn.connect("clicked", lambda b: self.populate_restore_sources())
+        source_group.add(self.refresh_sources_btn)
+
+        # Restore Items Section
+        restore_items_group = Adw.PreferencesGroup(title="Items to Restore", description="Select what you want to restore to your system")
+        content_box.append(restore_items_group)
+
+        for cat in BACKUP_CATEGORIES:
+            row = Adw.ActionRow(title=cat["title"], subtitle=cat["subtitle"])
+            sw = Gtk.Switch()
+            sw.set_active(True)
+            sw.set_valign(Gtk.Align.CENTER)
+            row.add_suffix(sw)
+            row.set_activatable_widget(sw)
+            restore_items_group.add(row)
+            self.restore_switches[cat["id"]] = sw
+
+        # Restore Status / Progress
+        self.restore_log_group = Adw.PreferencesGroup(title="Restore Status")
+        content_box.append(self.restore_log_group)
+
+        self.restore_progress_bar = Gtk.ProgressBar()
+        self.restore_progress_bar.set_fraction(0.0)
+        self.restore_log_group.add(self.restore_progress_bar)
+
+        self.restore_status_label = Gtk.Label(label="Select a source and items to restore.")
+        self.restore_status_label.set_xalign(0.0)
+        self.restore_status_label.set_margin_top(8)
+        self.restore_log_group.add(self.restore_status_label)
+
+        # Restore Bottom Bar
+        bottom_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        bottom_bar.set_margin_top(8)
+        bottom_bar.set_margin_bottom(16)
+        content_box.append(bottom_bar)
+
+        r_select_all = Gtk.Button(label="Select All")
+        r_select_all.connect("clicked", lambda b: self.set_all_switches(self.restore_switches, True))
+        bottom_bar.append(r_select_all)
+
+        r_deselect = Gtk.Button(label="Deselect All")
+        r_deselect.connect("clicked", lambda b: self.set_all_switches(self.restore_switches, False))
+        bottom_bar.append(r_deselect)
+
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        bottom_bar.append(spacer)
+
+        self.restore_btn = Gtk.Button(label="Restore Selected Items")
+        self.restore_btn.add_css_class("destructive-action")
+        self.restore_btn.connect("clicked", self.on_start_restore)
+        bottom_bar.append(self.restore_btn)
+
+        self.populate_restore_sources()
+        return scrolled
+
+    def set_all_switches(self, switch_dict, state):
+        for sw in switch_dict.values():
+            sw.set_active(state)
+
+    def populate_restore_sources(self):
+        while self.source_model.get_n_items() > 0:
+            self.source_model.remove(0)
+
+        self.source_paths = []
+
+        # 1. GitHub dotfiles clone
+        machine_source = self.machine_root(self.repo_dir)
+        if os.path.isdir(machine_source):
+            self.source_model.append(f"GitHub: {self.machine_name}")
+            self.source_paths.append(machine_source)
+        else:
+            self.source_model.append("GitHub Repository (legacy root)")
+            self.source_paths.append(self.repo_dir)
+
+        # 2. VAULT backups
+        if os.path.isdir(self.vault_base):
+            entries = sorted(
+                glob.glob(os.path.join(self.vault_base, self.machine_name, "Backup *")),
+                reverse=True,
+            )
+            for entry in entries:
+                name = os.path.basename(entry)
+                self.source_model.append(f"VAULT ({self.machine_name}): {name}")
+                self.source_paths.append(entry)
+            # Keep older date-only snapshots available for restore.
+            legacy_entries = sorted(glob.glob(os.path.join(self.vault_base, "Backup *")), reverse=True)
+            for entry in legacy_entries:
+                name = os.path.basename(entry)
+                self.source_model.append(f"VAULT (legacy): {name}")
+                self.source_paths.append(entry)
+
+        if self.source_model.get_n_items() > 0:
+            self.source_row.set_selected(0)
+            self.on_restore_source_changed(self.source_row, None)
+
+    def on_restore_source_changed(self, row, param):
+        idx = row.get_selected()
+        if 0 <= idx < len(self.source_paths):
+            src = self.source_paths[idx]
+            self.restore_status_label.set_text(f"Selected source: {src}")
+
+    def on_custom_toggle(self, sw, param):
+        active = sw.get_active()
+        self.custom_choose_btn.set_sensitive(active)
+        if not active:
+            self.custom_row.set_subtitle("Disabled")
+        elif self.custom_path:
+            self.custom_row.set_subtitle(self.custom_path)
+        else:
+            self.custom_row.set_subtitle("Select a target directory...")
+
+    def on_choose_folder(self, btn):
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Select Backup Destination Folder")
+        dialog.select_folder(self, None, self.on_folder_selected)
+
+    def on_folder_selected(self, dialog, result):
+        try:
+            folder = dialog.select_folder_finish(result)
+            if folder:
+                self.custom_path = folder.get_path()
+                self.custom_row.set_subtitle(self.custom_path)
+        except Exception:
+            pass
+
+    # ------------------ BACKUP EXECUTION ------------------
+    def on_start_backup(self, btn):
+        dest_gh = self.github_switch.get_active()
+        dest_vault = self.local_switch.get_active() and os.path.isdir("/run/media/subi/VAULT")
+        dest_custom = self.custom_switch.get_active() and bool(self.custom_path)
+
+        if not (dest_gh or dest_vault or dest_custom):
+            self.status_label.set_text("⚠️ Please select at least one valid destination.")
+            return
+
+        selected_items = [cid for cid, sw in self.switches.items() if sw.get_active()]
+        if not selected_items:
+            self.status_label.set_text("⚠️ Please select at least one item to backup.")
+            return
+
+        self.backup_btn.set_sensitive(False)
+        self.progress_bar.set_fraction(0.05)
+        self.status_label.set_text("Starting incremental backup...")
+
+        thread = threading.Thread(target=self.run_backup, args=(dest_gh, dest_vault, dest_custom, selected_items))
+        thread.daemon = True
+        thread.start()
+
+    def update_ui_status(self, text, frac):
+        GLib.idle_add(self._apply_status, text, frac)
+
+    def _apply_status(self, text, frac):
+        self.status_label.set_text(text)
+        self.progress_bar.set_fraction(frac)
+
+    def finish_backup(self, success, msg):
+        GLib.idle_add(self._apply_finish, success, msg)
+
+    def _apply_finish(self, success, msg):
+        self.backup_btn.set_sensitive(True)
+        self.progress_bar.set_fraction(1.0 if success else 0.0)
+        self.status_label.set_text(msg)
+        self.populate_restore_sources()
+        subprocess.run(["notify-send", "-a", "Backup Hub", "Backup Completed" if success else "Backup Failed", msg])
+
+    def run_backup(self, dest_gh, dest_vault, dest_custom, selected_items):
+        try:
+            date_str = datetime.now().strftime("%d-%m-%Y")
+            repo = self.repo_dir
+            backup_root = self.machine_root(repo)
+            os.makedirs(repo, exist_ok=True)
+            os.makedirs(backup_root, exist_ok=True)
+
+            total_steps = len(selected_items) + 3
+            cur_step = 0
+
+            # Sync chosen items incrementally
+            for cat in BACKUP_CATEGORIES:
+                cid = cat["id"]
+                if cid not in selected_items:
+                    continue
+
+                cur_step += 1
+                self.update_ui_status(f"Syncing {cat['title']}...", cur_step / total_steps)
+
+                exclude_flags = []
+                for ex in cat.get("exclude", []):
+                    exclude_flags.extend(["--exclude", ex])
+
+                if "source" in cat:
+                    src = cat["source"]
+                    dst = os.path.join(backup_root, cat["dest_sub"])
+                    if os.path.exists(src):
+                        os.makedirs(dst, exist_ok=True)
+                        cmd = ["rsync", "-a", "--delete"] + exclude_flags + [f"{src}/", f"{dst}/"]
+                        subprocess.run(cmd)
+
+                elif "sources" in cat:
+                    for src, sub, _ in cat["sources"]:
+                        if os.path.exists(src):
+                            dst = os.path.join(backup_root, sub)
+                            os.makedirs(dst, exist_ok=True)
+                            cmd = ["rsync", "-a", "--delete"] + exclude_flags + [f"{src}/", f"{dst}/"]
+                            subprocess.run(cmd)
+
+                elif "files" in cat:
+                    for fpath, sub, _ in cat["files"]:
+                        if os.path.exists(fpath):
+                            dst_file = os.path.join(backup_root, sub)
+                            os.makedirs(os.path.dirname(dst_file), exist_ok=True)
+                            subprocess.run(["cp", fpath, dst_file])
+
+                elif cat.get("generator"):
+                    pkg_dir = os.path.join(backup_root, "packages")
+                    os.makedirs(pkg_dir, exist_ok=True)
+                    with open(os.path.join(pkg_dir, "pacman-explicit.txt"), "w") as f:
+                        subprocess.run(["pacman", "-Qe"], stdout=f)
+                    with open(os.path.join(pkg_dir, "aur-packages.txt"), "w") as f:
+                        subprocess.run(["pacman", "-Qm"], stdout=f)
+                    with open(os.path.join(pkg_dir, "omarchy-plugins.txt"), "w") as f:
+                        subprocess.run(["omarchy", "plugin", "list"], stdout=f)
+                    res = subprocess.run(["omarchy", "plugin", "list"], capture_output=True, text=True)
+                    third_party = []
+                    for line in res.stdout.splitlines()[1:]:
+                        parts = line.split()
+                        if len(parts) >= 3 and parts[1] == "enabled" and parts[2] == "third-party":
+                            third_party.append(parts[0])
+                    with open(os.path.join(pkg_dir, "omarchy-third-party-enabled.txt"), "w") as f:
+                        f.write("\n".join(third_party) + "\n")
+                    mise_cfg = os.path.expanduser("~/.config/mise/config.toml")
+                    if os.path.isfile(mise_cfg):
+                        subprocess.run(["cp", mise_cfg, os.path.join(pkg_dir, "mise-tools.toml")])
+
+            # Cleanup any bulky temp/cache files from scripts/local-bin in repo
+            bin_target = os.path.join(backup_root, "scripts/local-bin")
+            if os.path.isdir(bin_target):
+                subprocess.run(["find", bin_target, "-name", "*.bak*", "-delete"])
+                subprocess.run(["find", bin_target, "-name", "__pycache__", "-exec", "rm", "-rf", "{}", "+"])
+                subprocess.run(["rm", "-f", os.path.join(bin_target, "agy")])
+
+            # Push to GitHub
+            gh_msg = ""
+            if dest_gh:
+                cur_step += 1
+                self.update_ui_status("Committing and pushing changes to GitHub...", cur_step / total_steps)
+                subprocess.run(["git", "-C", repo, "add", "-A"])
+                diff = subprocess.run(["git", "-C", repo, "diff", "--cached", "--quiet"])
+                if diff.returncode != 0:
+                    subprocess.run(["git", "-C", repo, "commit", "-m", f"Backup update {date_str}"])
+                    push_res = subprocess.run(
+                        self.git_command(repo, "push", "origin", "main"),
+                        capture_output=True,
+                        text=True,
+                    )
+                    if push_res.returncode == 0:
+                        gh_msg = " • Pushed latest changes to GitHub"
+                    else:
+                        gh_msg = f" • GitHub warning: {push_res.stderr.strip()[:60]}"
+                else:
+                    gh_msg = " • GitHub already up to date (no changes)"
+
+            # Sync to VAULT under main Omarchy Backup folder
+            vault_msg = ""
+            if dest_vault:
+                cur_step += 1
+                self.update_ui_status("Syncing to VAULT external drive...", cur_step / total_steps)
+                os.makedirs(self.vault_base, exist_ok=True)
+                vault_target = os.path.join(
+                    self.vault_base, self.machine_name, f"Backup {date_str}"
+                )
+                os.makedirs(vault_target, exist_ok=True)
+                subprocess.run(["rsync", "-a", "--delete", f"{repo}/", f"{vault_target}/"])
+                vault_msg = f" • Synced to VAULT ({vault_target})"
+
+            # Sync to Custom folder
+            custom_msg = ""
+            if dest_custom and self.custom_path:
+                cur_step += 1
+                self.update_ui_status(f"Syncing to {self.custom_path}...", cur_step / total_steps)
+                custom_target = os.path.join(
+                    self.custom_path, self.machine_name, f"Backup {date_str}"
+                )
+                os.makedirs(custom_target, exist_ok=True)
+                subprocess.run(["rsync", "-a", "--delete", f"{repo}/", f"{custom_target}/"])
+                custom_msg = f" • Synced to {custom_target}"
+
+            final_msg = f"✅ Backup complete!\n{gh_msg}\n{vault_msg}\n{custom_msg}".strip()
+            self.finish_backup(True, final_msg)
+
+        except Exception as e:
+            self.finish_backup(False, f"❌ Backup error: {str(e)}")
+
+    # ------------------ RESTORE EXECUTION ------------------
+    def on_start_restore(self, btn):
+        idx = self.source_row.get_selected()
+        if idx < 0 or idx >= len(self.source_paths):
+            self.restore_status_label.set_text("⚠️ Invalid restore source selected.")
+            return
+
+        source_dir = self.source_paths[idx]
+        selected_items = [cid for cid, sw in self.restore_switches.items() if sw.get_active()]
+
+        if not selected_items:
+            self.restore_status_label.set_text("⚠️ Please select at least one item to restore.")
+            return
+
+        self.restore_btn.set_sensitive(False)
+        self.restore_progress_bar.set_fraction(0.05)
+        self.restore_status_label.set_text("Starting restore...")
+
+        thread = threading.Thread(target=self.run_restore, args=(source_dir, selected_items))
+        thread.daemon = True
+        thread.start()
+
+    def update_restore_status(self, text, frac):
+        GLib.idle_add(self._apply_restore_status, text, frac)
+
+    def _apply_restore_status(self, text, frac):
+        self.restore_status_label.set_text(text)
+        self.restore_progress_bar.set_fraction(frac)
+
+    def finish_restore(self, success, msg):
+        GLib.idle_add(self._apply_restore_finish, success, msg)
+
+    def _apply_restore_finish(self, success, msg):
+        self.restore_btn.set_sensitive(True)
+        self.restore_progress_bar.set_fraction(1.0 if success else 0.0)
+        self.restore_status_label.set_text(msg)
+        subprocess.run(["notify-send", "-a", "Backup Hub", "Restore Completed" if success else "Restore Failed", msg])
+
+    def run_restore(self, source_dir, selected_items):
+        try:
+            # If source is git repo, ensure it's pulled first
+            if source_dir == self.machine_root(self.repo_dir):
+                self.update_restore_status("Pulling latest commits from GitHub...", 0.05)
+                subprocess.run(
+                    self.git_command(self.repo_dir, "pull", "origin", "main"),
+                    capture_output=True,
+                    text=True,
+                )
+
+            total_steps = len(selected_items) + 2
+            cur_step = 0
+
+            for cat in BACKUP_CATEGORIES:
+                cid = cat["id"]
+                if cid not in selected_items:
+                    continue
+
+                cur_step += 1
+                self.update_restore_status(f"Restoring {cat['title']}...", cur_step / total_steps)
+
+                if "source" in cat:
+                    src = os.path.join(source_dir, cat["dest_sub"])
+                    dst = cat["restore_dest"]
+                    if os.path.exists(src):
+                        os.makedirs(dst, exist_ok=True)
+                        subprocess.run(["rsync", "-a", f"{src}/", f"{dst}/"])
+
+                elif "sources" in cat:
+                    for _, sub, r_dst in cat["sources"]:
+                        src = os.path.join(source_dir, sub)
+                        if os.path.exists(src):
+                            os.makedirs(r_dst, exist_ok=True)
+                            subprocess.run(["rsync", "-a", f"{src}/", f"{r_dst}/"])
+
+                elif "files" in cat:
+                    for _, sub, r_dst in cat["files"]:
+                        src_file = os.path.join(source_dir, sub)
+                        if os.path.isfile(src_file):
+                            os.makedirs(os.path.dirname(r_dst), exist_ok=True)
+                            subprocess.run(["cp", src_file, r_dst])
+
+                elif cat.get("generator"):
+                    # Re-enable plugins
+                    enabled_txt = os.path.join(source_dir, "packages/omarchy-third-party-enabled.txt")
+                    if os.path.isfile(enabled_txt):
+                        with open(enabled_txt) as f:
+                            for line in f:
+                                plugin_id = line.strip()
+                                if plugin_id:
+                                    subprocess.run(["omarchy", "plugin", "add", plugin_id, "--enable"], capture_output=True)
+                                    subprocess.run(["omarchy", "plugin", "enable", plugin_id], capture_output=True)
+
+            # Reload daemons and keybindings
+            cur_step += 1
+            self.update_restore_status("Reloading system services & window manager...", cur_step / total_steps)
+            subprocess.run(["systemctl", "--user", "daemon-reload"])
+            subprocess.run(["systemctl", "--user", "restart", "weazystroke.service"], capture_output=True)
+            subprocess.run(["hyprctl", "reload"], capture_output=True)
+
+            self.finish_restore(True, f"✅ Selected items restored successfully from:\n{source_dir}")
+
+        except Exception as e:
+            self.finish_restore(False, f"❌ Restore error: {str(e)}")
+
+if __name__ == "__main__":
+    app = BackupApp()
+    sys.exit(app.run(sys.argv))

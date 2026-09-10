@@ -1,0 +1,21 @@
+#!/bin/bash
+dir="$1" # "next" or "prev"
+
+# Check index and count
+curr="${imv_current_index:-0}"
+total="${imv_file_count:-0}"
+pid="${imv_pid:-}"
+
+if [[ -z "$pid" || "$total" -le 1 ]]; then
+  exit 0
+fi
+
+if [[ "$dir" == "next" ]]; then
+  if [[ "$curr" -lt "$total" ]]; then
+    imv-msg "$pid" next
+  fi
+elif [[ "$dir" == "prev" ]]; then
+  if [[ "$curr" -gt 1 ]]; then
+    imv-msg "$pid" prev
+  fi
+fi

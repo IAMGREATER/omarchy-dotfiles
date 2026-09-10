@@ -1,0 +1,9 @@
+[tools]
+codex = "latest"
+copilot = "latest"
+gemini = { version = "latest", allow_builds = ["@github/keytar", "node-pty"] }
+gh = "latest"
+node = "26.7.0"
+
+[settings.upgrade]
+auto_prune = false

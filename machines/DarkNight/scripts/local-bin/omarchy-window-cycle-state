@@ -1,0 +1,269 @@
+#!/usr/bin/env python3
+"""
+Omarchy Window State Cycler:
+Cycles the active window between:
+1. Maximized (full screen area)
+2. Centered Pop-up (floating in center with margins around)
+3. Original placement / size (if started non-maximized)
+
+If the window started already maximized, toggles smoothly between Maximized <-> Centered Pop-up.
+"""
+
+import sys
+import os
+import glob
+import json
+import socket
+import subprocess
+
+STATE_FILE = os.path.expanduser("~/.local/state/omarchy/cycle_state.json")
+GAP = 2
+
+
+def find_live_socket2():
+    uid = os.getuid()
+    runtime_dir = os.getenv("XDG_RUNTIME_DIR", f"/run/user/{uid}")
+    os.environ["XDG_RUNTIME_DIR"] = runtime_dir
+
+    cur_sig = os.getenv("HYPRLAND_INSTANCE_SIGNATURE")
+    if cur_sig:
+        for base in [f"{runtime_dir}/hypr/{cur_sig}", f"/tmp/hypr/{cur_sig}"]:
+            sock_p = f"{base}/.socket2.sock"
+            if os.path.exists(sock_p):
+                try:
+                    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                    s.settimeout(0.2)
+                    s.connect(sock_p)
+                    s.close()
+                    return cur_sig
+                except Exception:
+                    pass
+
+    candidates = glob.glob(f"{runtime_dir}/hypr/*/.socket2.sock") + glob.glob(f"/tmp/hypr/*/.socket2.sock")
+    if candidates:
+        candidates.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+        for cand in candidates:
+            try:
+                s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                s.settimeout(0.2)
+                s.connect(cand)
+                s.close()
+                sig = os.path.basename(os.path.dirname(cand))
+                os.environ["HYPRLAND_INSTANCE_SIGNATURE"] = sig
+                return sig
+            except Exception:
+                continue
+
+    return None
+
+
+def ensure_hypr_env():
+    return find_live_socket2()
+
+
+def get_hypr_data():
+    ensure_hypr_env()
+    monitors, active_win, clients = [], None, []
+    cursor_pos = (0, 0)
+    try:
+        monitors = json.loads(subprocess.check_output(["hyprctl", "monitors", "-j"], timeout=1))
+    except Exception:
+        pass
+    try:
+        active_win = json.loads(subprocess.check_output(["hyprctl", "activewindow", "-j"], timeout=1))
+    except Exception:
+        pass
+    try:
+        clients = json.loads(subprocess.check_output(["hyprctl", "clients", "-j"], timeout=1))
+    except Exception:
+        pass
+    try:
+        cursor_raw = subprocess.check_output(["hyprctl", "cursorpos"], timeout=0.3).decode().strip()
+        cursor_pos = tuple(int(v.strip()) for v in cursor_raw.split(","))
+    except Exception:
+        pass
+    return monitors, active_win, clients, cursor_pos
+
+
+def find_active_monitor(monitors, active_win, cursor_pos):
+    if active_win and "monitor" in active_win:
+        for m in monitors:
+            if m.get("id") == active_win["monitor"] and not m.get("disabled", False):
+                return m
+
+    cur_x, cur_y = cursor_pos
+    for m in monitors:
+        if not m.get("disabled", False):
+            mx, my = m["x"], m["y"]
+            mw, mh = m["width"], m["height"]
+            if mx <= cur_x < mx + mw and my <= cur_y < my + mh:
+                return m
+
+    for m in monitors:
+        if m.get("focused", False) and not m.get("disabled", False):
+            return m
+
+    return monitors[0] if monitors else None
+
+
+def load_state():
+    try:
+        if os.path.exists(STATE_FILE):
+            with open(STATE_FILE, "r") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def save_state(state):
+    try:
+        os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+        with open(STATE_FILE, "w") as f:
+            json.dump(state, f, indent=2)
+    except Exception:
+        pass
+
+
+def hypr_eval(code):
+    ensure_hypr_env()
+    try:
+        subprocess.run(["hyprctl", "eval", code], capture_output=True, timeout=1.5)
+    except Exception:
+        pass
+
+
+def clamp_geometry(tx, ty, tw, th, avail_x, avail_y, avail_w, avail_h):
+    cw = max(250, min(tw, avail_w))
+    ch = max(180, min(th, avail_h))
+    cx = max(avail_x, min(tx, avail_x + avail_w - cw))
+    cy = max(avail_y, min(ty, avail_y + avail_h - ch))
+    return int(cx), int(cy), int(cw), int(ch)
+
+
+def cycle_window_state():
+    monitors, active_win, clients, cursor_pos = get_hypr_data()
+    win = active_win
+
+    # If win is None or an overlay/menu (eswl-overlay, rofi, etc.), find window under cursor
+    if not win or not win.get("address") or win.get("class") in ("eswl-overlay", "eswl-tray", "rofi", "fuzzel", "wofi", "quickshell"):
+        cur_x, cur_y = cursor_pos
+        for c in reversed(clients):
+            if c.get("mapped") and not c.get("hidden") and c.get("class") not in ("eswl-overlay", "eswl-tray", "rofi", "fuzzel", "wofi", "quickshell"):
+                wx, wy = c.get("at", [0, 0])
+                ww, wh = c.get("size", [0, 0])
+                if wx <= cur_x <= wx + ww and wy <= cur_y <= wy + wh:
+                    win = c
+                    break
+
+        if not win or win.get("class") in ("eswl-overlay", "eswl-tray", "rofi", "fuzzel", "wofi", "quickshell"):
+            for c in clients:
+                if c.get("mapped") and not c.get("hidden") and c.get("class") not in ("eswl-overlay", "eswl-tray", "rofi", "fuzzel", "wofi", "quickshell"):
+                    win = c
+                    break
+
+    if not win or not win.get("address"):
+        return
+
+    addr = win["address"]
+    norm_addr = addr if addr.startswith("0x") else ("0x" + addr)
+    window_spec = f"address:{norm_addr}"
+
+    mon = find_active_monitor(monitors, win, cursor_pos)
+    if not mon:
+        return
+
+    res = mon.get("reserved", [0, 0, 0, 0])
+    avail_x = mon["x"] + res[0] + GAP
+    avail_y = mon["y"] + res[1] + GAP
+    avail_w = mon["width"] - res[0] - res[2] - (GAP * 2)
+    avail_h = mon["height"] - res[1] - res[3] - (GAP * 2)
+
+    cur_x = win["at"][0]
+    cur_y = win["at"][1]
+    cur_w = win["size"][0]
+    cur_h = win["size"][1]
+
+    # Pop-up size (70% width, 72% height)
+    popup_w = max(500, int(avail_w * 0.70))
+    popup_h = max(400, int(avail_h * 0.72))
+    popup_x = avail_x + (avail_w - popup_w) // 2
+    popup_y = avail_y + (avail_h - popup_h) // 2
+
+    is_currently_max = (cur_w >= avail_w - 25 and cur_h >= avail_h - 25)
+    is_currently_popup = (abs(cur_w - popup_w) <= 35 and abs(cur_h - popup_h) <= 35 and abs(cur_x - popup_x) <= 35 and abs(cur_y - popup_y) <= 35)
+
+    all_state = load_state()
+    win_state = all_state.get(norm_addr, {})
+
+    last_state = win_state.get("state")
+    orig_geom = win_state.get("orig_geom")
+    started_maximized = win_state.get("started_maximized", False)
+
+    # First time seeing this window
+    if not win_state or not last_state:
+        if is_currently_max:
+            win_state = {
+                "state": "popup",
+                "started_maximized": True,
+                "orig_geom": None
+            }
+            target = "popup"
+        else:
+            win_state = {
+                "state": "maximized",
+                "started_maximized": False,
+                "orig_geom": {"x": cur_x, "y": cur_y, "w": cur_w, "h": cur_h}
+            }
+            target = "maximized"
+    else:
+        # Existing window with tracked state
+        if started_maximized or not orig_geom:
+            # 2-state loop: maximized <-> popup
+            if is_currently_max or last_state == "maximized":
+                target = "popup"
+            else:
+                target = "maximized"
+        else:
+            # 3-state loop: original -> maximized -> popup -> original
+            if is_currently_max or last_state == "maximized":
+                target = "popup"
+            elif is_currently_popup or last_state == "popup":
+                target = "original"
+            else:
+                # In original or custom position
+                # Update orig_geom in case user moved it
+                win_state["orig_geom"] = {"x": cur_x, "y": cur_y, "w": cur_w, "h": cur_h}
+                target = "maximized"
+
+    # Calculate target coordinates
+    if target == "maximized":
+        tx, ty, tw, th = avail_x, avail_y, avail_w, avail_h
+        win_state["state"] = "maximized"
+    elif target == "popup":
+        tx, ty, tw, th = popup_x, popup_y, popup_w, popup_h
+        win_state["state"] = "popup"
+    elif target == "original":
+        og = win_state.get("orig_geom", {})
+        tx = og.get("x", avail_x + 100)
+        ty = og.get("y", avail_y + 100)
+        tw = og.get("w", max(400, int(avail_w * 0.5)))
+        th = og.get("h", max(300, int(avail_h * 0.5)))
+        win_state["state"] = "original"
+    else:
+        return
+
+    cx, cy, cw, ch = clamp_geometry(tx, ty, tw, th, avail_x, avail_y, avail_w, avail_h)
+
+    # Ensure window is floating and un-fullscreened, then apply target geometry
+    if not win.get("floating", True):
+        hypr_eval(f'hl.dispatch(hl.dsp.window.float({{ window = "{window_spec}" }}))')
+
+    hypr_eval(f'hl.dispatch(hl.dsp.focus({{ window = "{window_spec}" }})); hl.dispatch(hl.dsp.window.fullscreen_state({{ window = "{window_spec}", internal = 0, client = 0 }})); hl.dispatch(hl.dsp.window.float({{ window = "{window_spec}" }})); hl.dispatch(hl.dsp.window.resize({{ window = "{window_spec}", x = {cw}, y = {ch} }})); hl.dispatch(hl.dsp.window.move({{ window = "{window_spec}", x = {cx}, y = {cy} }})); hl.dispatch(hl.dsp.window.bring_to_top({{ window = "{window_spec}" }})); hl.dispatch(hl.dsp.window.alter_zorder({{ window = "{window_spec}", mode = "top" }}))')
+
+    all_state[norm_addr] = win_state
+    save_state(all_state)
+
+
+if __name__ == "__main__":
+    cycle_window_state()

@@ -1,0 +1,169 @@
+#!/usr/bin/env python3
+import datetime as dt
+import glob
+import json
+import os
+import re
+import subprocess
+import sys
+
+def get_agy_limits():
+    limits = []
+    tier_label = "Active"
+    try:
+        res = subprocess.run(["agy", "-p", "/usage", "--output-format", "json"], capture_output=True, text=True, timeout=10)
+        if res.returncode == 0 and res.stdout.strip():
+            data = json.loads(res.stdout)
+            cmd_data = data.get("command", {}).get("data", {})
+            groups = cmd_data.get("groups", [])
+            for g in groups:
+                group_name = g.get("name", "")
+                for b in g.get("buckets", []):
+                    rem = b.get("remaining_fraction", 1.0)
+                    rem_pct = round(max(0.0, min(1.0, rem)), 4)
+                    window = b.get("window", "")
+                    limits.append({
+                        "label": f"{group_name} {window} Remaining".strip(),
+                        "title": f"{group_name} {window} Remaining".strip(),
+                        "percent": rem_pct,
+                        "resetsAt": b.get("reset_time", "")
+                    })
+    except Exception as e:
+        pass
+    return limits, tier_label
+
+def main():
+    home = os.path.expanduser("~")
+    brain_dir = os.path.join(home, ".gemini", "antigravity-cli", "brain")
+    
+    today_date = dt.date.today()
+    recent_dates = [(today_date - dt.timedelta(days=i)).isoformat() for i in range(6, -1, -1)]
+    days_tokens = {d: 0 for d in recent_dates}
+    
+    model_stats = {}
+    today_prompts = 0
+    today_sessions = 0
+    today_total_tokens = 0
+    today_tokens_by_model = {}
+    
+    total_prompts = 0
+    total_sessions = 0
+    active_dates_set = set()
+    
+    logs = glob.glob(os.path.join(brain_dir, "*", ".system_generated", "logs", "transcript*.jsonl"))
+    
+    # Process unique conversations
+    conversations = set()
+    for log_path in logs:
+        if "transcript_full.jsonl" in log_path and os.path.exists(log_path.replace("_full", "")):
+            continue
+            
+        convo_id = log_path.split("/")[-4]
+        conversations.add(convo_id)
+        total_sessions += 1
+        
+        current_model = "gemini-3.8-flash"
+        convo_saw_today = False
+        
+        try:
+            with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except Exception:
+                        continue
+                    
+                    created_at = row.get("created_at", "")
+                    date_str = created_at[:10] if created_at else ""
+                    if date_str:
+                        active_dates_set.add(date_str)
+                    
+                    is_today = (date_str == recent_dates[-1])
+                    if is_today:
+                        convo_saw_today = True
+                    
+                    content = row.get("content", "")
+                    if "Model Selection" in content:
+                        m = re.search(r"Model Selection.*to ([\w\.\-]+)", content)
+                        if m:
+                            raw_model = m.group(1).lower()
+                            if "pro" in raw_model:
+                                current_model = "gemini-2.5-pro"
+                            elif "flash" in raw_model:
+                                current_model = "gemini-3.8-flash"
+                    
+                    # Token approximation (~4 chars/token)
+                    tokens = max(1, len(content) // 4)
+                    
+                    if current_model not in model_stats:
+                        model_stats[current_model] = {
+                            "inputTokens": 0,
+                            "outputTokens": 0,
+                            "cacheReadInputTokens": 0,
+                            "cacheCreationInputTokens": 0
+                        }
+                    
+                    step_type = row.get("type")
+                    if step_type == "USER_INPUT":
+                        total_prompts += 1
+                        model_stats[current_model]["inputTokens"] += tokens
+                        if is_today:
+                            today_prompts += 1
+                            today_total_tokens += tokens
+                            today_tokens_by_model[current_model] = today_tokens_by_model.get(current_model, 0) + tokens
+                        if date_str in days_tokens:
+                            days_tokens[date_str] += tokens
+                    elif step_type == "PLANNER_RESPONSE":
+                        model_stats[current_model]["outputTokens"] += tokens
+                        if is_today:
+                            today_total_tokens += tokens
+                            today_tokens_by_model[current_model] = today_tokens_by_model.get(current_model, 0) + tokens
+                        if date_str in days_tokens:
+                            days_tokens[date_str] += tokens
+        except Exception:
+            pass
+            
+        if convo_saw_today:
+            today_sessions += 1
+
+    recent_days = [{"date": d, "messageCount": days_tokens[d]} for d in recent_dates]
+    active_dates = sorted(list(active_dates_set))
+    
+    limits, tier_label = get_agy_limits()
+    if not limits:
+        limits = [
+            {
+                "label": "Session Remaining",
+                "title": "Session Remaining",
+                "percent": max(0.0, 1.0 - (today_total_tokens / 1000000)),
+                "resetsAt": (dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=4)).isoformat()
+            }
+        ]
+    
+    record = {
+        "schemaVersion": 1,
+        "id": "antigravity",
+        "name": "Antigravity",
+        "updatedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "ready": True,
+        "hasLocalStats": True,
+        "tierLabel": tier_label,
+        "usageStatusText": "Gemini AI Agent",
+        "todayPrompts": today_prompts,
+        "todaySessions": today_sessions,
+        "todayTotalTokens": today_total_tokens,
+        "todayTokensByModel": today_tokens_by_model,
+        "totalPrompts": total_prompts,
+        "totalSessions": total_sessions,
+        "activeDays": len(active_dates),
+        "activeDates": active_dates,
+        "modelUsage": model_stats,
+        "limits": limits
+    }
+    
+    print(json.dumps(record, indent=2))
+
+if __name__ == "__main__":
+    main()
